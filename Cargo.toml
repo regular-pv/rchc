@@ -1,0 +1,12 @@
+[package]
+name = "rchc"
+version = "0.1.0"
+authors = ["Timothée Haudebourg <timothee.haudebourg@irisa.fr>"]
+edition = "2018"
+
+[dependencies]
+log = "*"
+stderrlog = "*"
+clap = { version = "~2.27.0", features = ["yaml"] }
+smt2 = { path = "../smt2" }
+tree-automata = { path = "../../../timbuk-rs/tree-automata" }

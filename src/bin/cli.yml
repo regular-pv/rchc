@@ -1,0 +1,12 @@
+name: rchc
+version: "1.0"
+author: Timothée Haudebourg <timothee.haudebourg@irisa.fr>
+about: A regular CHC solver
+args:
+  - INPUT:
+      help: Input SMT2-lib file.
+      index: 1
+  - verbose:
+      short: v
+      multiple: true
+      help: Sets the level of verbosity.
