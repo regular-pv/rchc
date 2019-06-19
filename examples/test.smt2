@@ -10,7 +10,11 @@
 (declare-fun f1 ( Nat ) Bool)
 
 (assert
-  (forall ( (x Bool) (y Bool) ) (=> x y) )
+  (forall ( (x Nat) (y Bool) ) (=> (f1 x) y) )
+)
+
+(assert
+  (not (exists ((x Bool)) x))
 )
 
 (check-sat) ; bouh
