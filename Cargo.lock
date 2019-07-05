@@ -21,6 +21,14 @@ version = "0.1.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 
 [[package]]
+name = "automatic-relations"
+version = "0.1.0"
+dependencies = [
+ "terms 0.1.0",
+ "tree-automata 0.1.0",
+]
+
+[[package]]
 name = "bitflags"
 version = "0.9.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -99,10 +107,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 name = "rchc"
 version = "0.1.0"
 dependencies = [
+ "automatic-relations 0.1.0",
  "clap 2.27.1 (registry+https://github.com/rust-lang/crates.io-index)",
  "log 0.4.6 (registry+https://github.com/rust-lang/crates.io-index)",
  "smt2 0.1.0",
  "stderrlog 0.4.1 (registry+https://github.com/rust-lang/crates.io-index)",
+ "terms 0.1.0",
  "tree-automata 0.1.0",
 ]
 

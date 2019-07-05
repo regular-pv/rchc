@@ -9,4 +9,6 @@ log = "*"
 stderrlog = "*"
 clap = { version = "~2.27.0", features = ["yaml"] }
 smt2 = { path = "../smt2" }
+terms = { path = "../../../timbuk-rs/terms" }
 tree-automata = { path = "../../../timbuk-rs/tree-automata" }
+automatic-relations = { path = "../../../timbuk-rs/automatic-relations" }

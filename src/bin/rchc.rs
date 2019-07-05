@@ -6,10 +6,12 @@ extern crate clap;
 
 extern crate smt2;
 extern crate rchc;
+extern crate automatic_relations as automatic;
 
 use std::io::Read;
 use smt2::syntax::{Localisable, Buffer};
 use smt2::syntax::Parsable;
+use automatic::aligned;
 
 fn main() {
     // Parse options.
@@ -20,8 +22,14 @@ fn main() {
 	let verbosity = matches.occurrences_of("verbose") as usize;
     stderrlog::new().verbosity(verbosity).init().unwrap();
 
-	let teacher = Box::new(rchc::teacher::Explorer::new());
-	let mut env = rchc::Environment::new(teacher);
+	let mut solver_cmd = std::process::Command::new("cvc4");
+	solver_cmd.args(&["--incremental", "--finite-model-find", "--produce-model", "--lang=smtlib2"]);
+	let solver = smt2::Client::new(solver_cmd, rchc::learner::smt::Ident::Raw("Bool"), "Bool").expect("Unable to start the SMT-solver");
+
+	let teacher = rchc::teacher::Explorer::new();
+	let learner = rchc::learner::SMTLearner::<_, _, aligned::Convolution>::new(solver);
+	let engine = rchc::Engine::new(learner, teacher);
+	let mut env = rchc::Environment::new(engine);
 
     // Choose the input.
     let stdin = std::io::stdin();
