@@ -69,6 +69,10 @@ impl<F: Clone, P: Clone + Eq + Hash> Teacher<F, P, Automaton<Convoluted<F>, Q, N
     /// If it is found to be unsat, gives a non-empty set of learning constraints violated by
     /// the model.
     fn check(&mut self, model: &Self::Model) -> std::result::Result<Result<F, P>, Error> {
+        // for clause in self.clauses.iter() {
+        //     // ...
+        // }
+
         panic!("TODO check")
     }
 }

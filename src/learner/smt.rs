@@ -10,6 +10,7 @@ use ta::{
 };
 use automatic::{Convolution, Convoluted};
 use smt2::{Server, Environment};
+use smt2::client::FromSyntaxSymbol;
 
 use super::{Learner, Constraint, Sample};
 
@@ -17,7 +18,7 @@ pub type Result<T> = std::result::Result<T, Error>;
 
 pub enum Error {
     Solver(SolverError),
-    Unsat,
+    // Unsat,
     Unknown
 }
 
@@ -31,30 +32,33 @@ impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             Error::Solver(e) => write!(f, "{}", e),
-            Error::Unsat => write!(f, "SMT-solver response to (check-sat) was `unsat`"),
+            // Error::Unsat => write!(f, "SMT-solver response to (check-sat) was `unsat`"),
             Error::Unknown => write!(f, "SMT-solver response to (check-sat) was `unknown`")
         }
     }
 }
 
-#[derive(Clone, Copy, Hash, PartialEq, Eq)]
-pub enum Ident {
-    Raw(&'static str),
-    Fresh(&'static str, usize)
+#[derive(Clone, Hash, PartialEq, Eq)]
+pub struct Ident(String, Option<usize>);
+
+impl FromSyntaxSymbol for Ident {
+    fn from_syntax<F: Clone>(id: &smt2::syntax::Symbol<F>) -> Ident {
+        Ident(id.id.clone(), None)
+    }
 }
 
 impl fmt::Display for Ident {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match self {
-            Ident::Raw(name) => write!(f, "{}", name),
-            Ident::Fresh(prefix, id) => write!(f, "{}{}", prefix, id)
+        match self.1 {
+            None => write!(f, "{}", self.0),
+            Some(id) => write!(f, "{}{}", self.0, id)
         }
     }
 }
 
 impl From<&'static str> for Ident {
     fn from(name: &'static str) -> Ident {
-        Ident::Raw(name)
+        Ident(name.to_string(), None)
     }
 }
 
@@ -80,7 +84,7 @@ pub type Q = usize;
 
 impl AbsQ {
     pub fn id(&self) -> Ident {
-        Ident::Fresh("q", self.0)
+        Ident("q".to_string(), Some(self.0))
     }
 
     pub fn as_fun(&self) -> Function {
@@ -123,7 +127,7 @@ impl<F: Symbol + Eq + Hash, P: Clone + Eq + Hash, C: Convolution<F>> SMTLearner<
     }
 
     fn op(&self, op: &'static str, args: Vec<smt2::Term<Solver>>) -> smt2::Term<Solver> {
-        smt2::Term::apply(Ident::Raw(op), args, self.solver.sort_bool())
+        smt2::Term::apply(Ident(op.to_string(), None), args, self.solver.sort_bool())
     }
 
     fn as_term(&self, q: &AbsQ) -> smt2::Term<Solver> {
@@ -190,7 +194,7 @@ impl<F: Symbol + Eq + Hash, P: Clone + Eq + Hash, C: Convolution<F>> Learner<F, 
         let index = self.automaton.len();
         self.predicate_ids.insert(p.clone(), index);
         self.automaton.push(Automaton::new());
-        Ok(self.solver.declare_fun(&Ident::Fresh("p", index), &vec![self.const_sort.clone()], &self.solver.sort_bool())?)
+        Ok(self.solver.declare_fun(&Ident("p".to_string(), Some(index)), &vec![self.const_sort.clone()], &self.solver.sort_bool())?)
     }
 
     /// Add a learning constraint.
@@ -222,9 +226,15 @@ impl<F: Symbol + Eq + Hash, P: Clone + Eq + Hash, C: Convolution<F>> Learner<F, 
     fn produce_model(&mut self) -> Result<Option<Self::Model>> {
         match self.solver.check_sat()? {
             smt2::response::CheckSat::Sat => {
-                panic!("TODO produce model")
+                let smt_model = self.solver.get_model()?;
+                let mut model = HashMap::new();
+                for def in smt_model.definitions.iter() {
+                    panic!("TODO")
+                }
+
+                Ok(Some(model))
             },
-            smt2::response::CheckSat::Unsat => Err(Error::Unsat),
+            smt2::response::CheckSat::Unsat => Ok(None),
             smt2::response::CheckSat::Unknown => Err(Error::Unknown)
         }
     }

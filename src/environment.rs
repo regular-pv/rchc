@@ -484,6 +484,10 @@ impl smt2::Server for Environment {
         std::process::exit(0);
     }
 
+    fn get_model(&mut self) -> Result<smt2::response::Model<Self>> {
+        panic!("TODO Environment::get_model")
+    }
+
     /// Set the solver's logic.
     fn set_logic(&mut self, logic: &Self::Logic) -> Result<()> {
         // doesn't have to do anything since the only logic we know is HORN.
