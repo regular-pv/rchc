@@ -6,8 +6,8 @@ use std::borrow::Borrow;
 use std::fmt;
 
 use smt2::GroundSort;
-
 use terms::Pattern;
+use ta::Ranked;
 
 use crate::{Error, Result, rich::*, engine};
 
@@ -24,13 +24,22 @@ type DataTypeDeclaration = smt2::DataTypeDeclaration<Environment>;
 type ConstructorDeclaration = smt2::ConstructorDeclaration<Environment>;
 type Term = smt2::Term<Environment>;
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct TypedConstructor {
     /// The term/pattern sort.
     sort: GroundSort<Rc<Sort>>,
 
     /// The constructor number as indexed in the data-type declaration.
-    n: usize
+    n: usize,
+
+    // arity of the constructor
+    arity: usize
+}
+
+impl Ranked for TypedConstructor {
+    fn arity(&self) -> usize {
+        self.arity
+    }
 }
 
 impl PartialEq for TypedConstructor {
@@ -45,6 +54,12 @@ impl Hash for TypedConstructor {
     fn hash<H: Hasher>(&self, state: &mut H) {
         self.n.hash(state);
         self.sort.hash(state)
+    }
+}
+
+impl fmt::Display for TypedConstructor {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{}", self.sort)
     }
 }
 
@@ -79,6 +94,12 @@ impl Hash for Sort {
 }
 
 impl fmt::Display for Sort {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        self.id.fmt(f)
+    }
+}
+
+impl fmt::Debug for Sort {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         self.id.fmt(f)
     }
@@ -295,9 +316,12 @@ impl Environment {
                 Ok(Pattern::var(*index))
             },
             smt2::Term::Apply { fun: Function::Constructor(_, n), args, sort } => {
+                let def = sort.sort.def.borrow();
+                let arity = def.as_ref().unwrap().constructors[*n].selectors.len();
                 let f = TypedConstructor {
                     sort: sort.clone(),
-                    n: *n
+                    n: *n,
+                    arity: arity
                 };
 
                 let mut sub_patterns = Vec::with_capacity(args.len());

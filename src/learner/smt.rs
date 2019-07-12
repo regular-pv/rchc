@@ -77,8 +77,14 @@ pub struct SMTLearner<F: Symbol, P, C: Convolution<F>> {
 }
 
 /// States of the abstract automaton.
-#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub struct AbsQ(usize);
+
+impl fmt::Display for AbsQ {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
 
 pub type Q = usize;
 

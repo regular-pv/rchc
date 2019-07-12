@@ -11,7 +11,7 @@ extern crate automatic_relations as automatic;
 use std::io::Read;
 use smt2::syntax::{Localisable, Buffer};
 use smt2::syntax::Parsable;
-use automatic::aligned;
+use automatic::convolution::aligned;
 
 fn main() {
     // Parse options.
