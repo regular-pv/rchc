@@ -20,6 +20,9 @@ impl fmt::Display for Error {
 }
 
 pub trait Abstract<F: Clone, P: Clone> {
+    /// Declare a new predicate to solve.
+    fn declare_predicate(&mut self, p: P) -> std::result::Result<(), Error>;
+
     /// Add a new clause to the solver.
     fn assert(&mut self, clause: rich::Clause<F, P>) -> std::result::Result<(), Error>;
 
@@ -73,6 +76,11 @@ impl<F: Clone, P: Clone, I, L, T, M> Engine<F, P, I, L, T, M> where M: Model<P, 
 }
 
 impl<F: Clone, P: Clone, I, L, T, M> Abstract<F, P> for Engine<F, P, I, L, T, M> where M: Model<P, I>, L: Learner<F, P, I, Model=M>, T: Teacher<F, P, I, Model=M> {
+    /// Declare a new predicate to solve.
+    fn declare_predicate(&mut self, p: P) -> std::result::Result<(), Error> {
+        Self::learner_result(self.learner.declare_predicate(p))
+    }
+
     /// Add a new clause to the solver.
     fn assert(&mut self, clause: rich::Clause<F, P>) -> std::result::Result<(), Error> {
         Self::teacher_result(self.teacher.assert(clause))

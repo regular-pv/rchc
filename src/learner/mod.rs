@@ -44,7 +44,7 @@ pub trait Learner<F, P, T> {
     type Error: fmt::Display;
 
     /// Declare a new predicate to learn.
-    fn declare_predicate(&mut self, p: &P) -> Result<(), Self::Error>;
+    fn declare_predicate(&mut self, p: P) -> Result<(), Self::Error>;
 
     /// Add a learning constraint.
     fn add(&mut self, new_constraint: Constraint<F, P>) -> Result<(), Self::Error>;

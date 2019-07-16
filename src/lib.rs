@@ -1,3 +1,5 @@
+#![feature(trait_alias)]
+
 #[macro_use]
 extern crate log;
 extern crate smt2;
@@ -5,6 +7,7 @@ extern crate terms;
 extern crate tree_automata as ta;
 extern crate automatic_relations as automatic;
 
+pub(crate) mod utils;
 mod error;
 mod clause;
 mod environment;
@@ -18,3 +21,7 @@ pub use environment::*;
 pub use teacher::Teacher;
 pub use learner::{Learner, Model};
 pub use engine::Engine;
+
+pub trait Sorted<S> {
+    fn sort(&self) -> &S;
+}

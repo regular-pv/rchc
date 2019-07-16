@@ -97,8 +97,8 @@ pub mod rich {
     }
 
     pub struct Clause<F: Clone, P: Clone> {
-        body: Vec<Expr<F, P>>,
-        head: Expr<F, P>
+        pub body: Vec<Expr<F, P>>,
+        pub head: Expr<F, P>
     }
 
     impl<F: Clone, P: Clone> Clause<F, P> {

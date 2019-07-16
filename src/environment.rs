@@ -1,15 +1,17 @@
 use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
 use std::rc::Rc;
-use std::cell::RefCell;
+use std::cell::Cell;
+use std::sync::{Arc, RwLock};
 use std::borrow::Borrow;
 use std::fmt;
 
 use smt2::GroundSort;
 use terms::Pattern;
-use ta::Ranked;
+use ta::{bottom_up::Automaton, combinations, NoLabel, Ranked};
+use automatic::{Convoluted, MaybeBottom};
 
-use crate::{Error, Result, rich::*, engine};
+use crate::{Error, Result, Sorted, rich::*, engine, utils::*};
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum Logic {
@@ -27,13 +29,19 @@ type Term = smt2::Term<Environment>;
 #[derive(Clone, Debug)]
 pub struct TypedConstructor {
     /// The term/pattern sort.
-    sort: GroundSort<Rc<Sort>>,
+    sort: GroundSort<Arc<Sort>>,
 
     /// The constructor number as indexed in the data-type declaration.
     n: usize,
 
     // arity of the constructor
     arity: usize
+}
+
+impl Sorted<GroundSort<Arc<Sort>>> for TypedConstructor {
+    fn sort(&self) -> &GroundSort<Arc<Sort>> {
+        &self.sort
+    }
 }
 
 impl Ranked for TypedConstructor {
@@ -63,25 +71,61 @@ impl fmt::Display for TypedConstructor {
     }
 }
 
+#[derive(Clone, Hash, PartialEq, Eq, Debug)]
+pub struct ConvolutedSort(pub Vec<MaybeBottom<GroundSort<Arc<crate::Sort>>>>);
+
+impl ConvolutedSort {
+    pub fn automaton(&self) -> Automaton<TypedConstructor, ConvolutedSort, NoLabel> {
+        // let defs = self.0.iter().map(|sort| {
+        //     match sort {
+        //         MaybeBottom::Bottom => None,
+        //         MaybeBottom::Some(sort) => Some(sort.def.read().unwrap())
+        //     }
+        // });
+        //
+        // for convoluted_cons in combinations(&defs, |def| {
+        //     match def {
+        //         Some(Some(d)) => {
+        //             let def = d.unwrap();
+        //             def.constructors.iter()
+        //         },
+        //         Some(None) => panic!("datatype is not yet defined!"),
+        //         None => {
+        //             panic!("None")
+        //         }
+        //     }
+        // }) {
+        //     //
+        // }
+        panic!("TODO compute convoluted sort automaton!")
+    }
+}
+
+impl fmt::Display for ConvolutedSort {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{}", PList(&self.0, "⊗"))
+    }
+}
+
 pub struct Sort {
     id: Ident,
     arity: usize,
-    def: RefCell<Option<DataTypeDeclaration>>
+    def: RwLock<Option<DataTypeDeclaration>>
 }
 
 impl Sort {
-    pub fn new<Id: Into<Ident>>(id: Id, arity: usize, def: Option<DataTypeDeclaration>) -> Sort {
-        Sort {
+    pub fn new<Id: Into<Ident>>(id: Id, arity: usize, def: Option<DataTypeDeclaration>) -> Arc<Sort> {
+        Arc::new(Sort {
             id: id.into(),
             arity: arity,
-            def: RefCell::new(def)
-        }
+            def: RwLock::new(def)
+        })
     }
 }
 
 impl PartialEq for Sort {
     fn eq(&self, other: &Sort) -> bool {
-        self.def.as_ptr() == other.def.as_ptr()
+        self as *const Sort == other as *const Sort
     }
 }
 
@@ -89,7 +133,7 @@ impl Eq for Sort {}
 
 impl Hash for Sort {
     fn hash<H: Hasher>(&self, state: &mut H) {
-        self.def.as_ptr().hash(state)
+        (self as *const Sort).hash(state)
     }
 }
 
@@ -111,7 +155,7 @@ pub enum Function {
     And,
     Implies,
     Predicate(Rc<Predicate>),
-    Constructor(Rc<Sort>, usize),
+    Constructor(Arc<Sort>, usize),
 }
 
 impl smt2::Function<Environment> for Function {
@@ -122,13 +166,14 @@ impl smt2::Function<Environment> for Function {
             Function::Implies => (2, 2),
             Function::Predicate(p) => p.arity(env),
             Function::Constructor(sort, n) => {
-                let k = sort.def.borrow().as_ref().unwrap().constructors[*n].selectors.len();
+                let def = sort.def.read().unwrap();
+                let k = def.as_ref().unwrap().constructors[*n].selectors.len();
                 (k, k)
             }
         }
     }
 
-    fn typecheck(&self, env: &Environment, args: &[GroundSort<Rc<Sort>>]) -> std::result::Result<GroundSort<Rc<Sort>>, smt2::TypeCheckError<Rc<Sort>>> {
+    fn typecheck(&self, env: &Environment, args: &[GroundSort<Arc<Sort>>]) -> std::result::Result<GroundSort<Arc<Sort>>, smt2::TypeCheckError<Arc<Sort>>> {
         use smt2::TypeCheckError::*;
         match self {
             Function::Not => {
@@ -157,8 +202,8 @@ impl smt2::Function<Environment> for Function {
             },
             Function::Predicate(p) => p.typecheck(env, args),
             Function::Constructor(sort, n) => {
-                let def_option = sort.def.borrow();
-                let def = def_option.borrow().as_ref().unwrap();
+                let def_option = sort.def.read().unwrap();
+                let def = def_option.as_ref().unwrap();
                 let cons = &def.constructors[*n];
 
                 let mut context = Vec::new();
@@ -190,7 +235,22 @@ impl smt2::Function<Environment> for Function {
 }
 
 pub struct Predicate {
-    args: Vec<GroundSort<Rc<Sort>>>
+    id: Ident,
+    args: Vec<GroundSort<Arc<Sort>>>,
+    domain: RefCell<Option<Automaton<TypedConstructor, ConvolutedSort, NoLabel>>>
+}
+
+impl Predicate {
+    fn domain(&self) -> Ref<Automaton<TypedConstructor, ConvolutedSort, NoLabel>> {
+        match self.domain.get() {
+            Some(aut) => aut,
+            None => {
+                let convoluted_sort = ConvolutedSort(self.args.iter().map(|sort| MaybeBottom::Some(sort.clone())).collect());
+                self.domain.set(convoluted_sort.automaton());
+                self.domain.borrow().as_ref().unwrap()
+            }
+        }
+    }
 }
 
 impl PartialEq for Predicate {
@@ -207,12 +267,18 @@ impl Hash for Predicate {
     }
 }
 
+impl fmt::Display for Predicate {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{}", self.id)
+    }
+}
+
 impl smt2::Function<Environment> for Predicate {
     fn arity(&self, _env: &Environment) -> (usize, usize) {
         (self.args.len(), self.args.len())
     }
 
-    fn typecheck(&self, env: &Environment, args: &[GroundSort<Rc<Sort>>]) -> std::result::Result<GroundSort<Rc<Sort>>, smt2::TypeCheckError<Rc<Sort>>> {
+    fn typecheck(&self, env: &Environment, args: &[GroundSort<Arc<Sort>>]) -> std::result::Result<GroundSort<Arc<Sort>>, smt2::TypeCheckError<Arc<Sort>>> {
         use smt2::TypeCheckError::*;
         for (i, arg) in args.iter().enumerate() {
             if *arg != self.args[i] {
@@ -226,10 +292,10 @@ impl smt2::Function<Environment> for Predicate {
 /// Regular CHC solver environement.
 pub struct Environment {
     /// Declared sorts.
-    sorts: HashMap<Ident, Rc<Sort>>,
+    sorts: HashMap<Ident, Arc<Sort>>,
 
     /// Bool.
-    sort_bool: GroundSort<Rc<Sort>>,
+    sort_bool: GroundSort<Arc<Sort>>,
 
     /// Functions.
     functions: HashMap<Ident, Function>,
@@ -242,13 +308,13 @@ impl Environment {
     /// Create a new environment.
     /// At first, only the sort Bool is defined.
     pub fn new<E: 'static + engine::Abstract<TypedConstructor, Rc<Predicate>>>(engine: E) -> Environment {
-        let sort_bool = Rc::new(Sort::new("Bool", 0, Some(DataTypeDeclaration {
+        let sort_bool = Sort::new("Bool", 0, Some(DataTypeDeclaration {
             parameters: Vec::new(),
             constructors: vec![
                 ConstructorDeclaration::simple("True"),
                 ConstructorDeclaration::simple("False")
             ]
-        })));
+        }));
 
         // pre-defined functions.
         let mut functions = HashMap::new();
@@ -273,7 +339,7 @@ impl Environment {
     }
 
     /// Register a new sort into the environment.
-    pub fn register_sort(&mut self, sort: Rc<Sort>) {
+    pub fn register_sort(&mut self, sort: Arc<Sort>) {
         self.sorts.insert(sort.id.clone(), sort);
     }
 
@@ -316,7 +382,7 @@ impl Environment {
                 Ok(Pattern::var(*index))
             },
             smt2::Term::Apply { fun: Function::Constructor(_, n), args, sort } => {
-                let def = sort.sort.def.borrow();
+                let def = sort.sort.def.read().unwrap();
                 let arity = def.as_ref().unwrap().constructors[*n].selectors.len();
                 let f = TypedConstructor {
                     sort: sort.clone(),
@@ -339,12 +405,12 @@ impl Environment {
 impl smt2::Environment for Environment {
     type Logic = Logic;
     type Ident = Ident;
-    type Sort = Rc<Sort>;
+    type Sort = Arc<Sort>;
     type Function = Function;
     type Error = Error;
 
     /// Find a sort.
-    fn sort(&self, id: &Ident) -> Option<Rc<Sort>> {
+    fn sort(&self, id: &Ident) -> Option<Arc<Sort>> {
         match self.sorts.get(id) {
             Some(sort) => Some(sort.clone()),
             None => None
@@ -352,7 +418,7 @@ impl smt2::Environment for Environment {
     }
 
     /// The Bool sort.
-    fn sort_bool(&self) -> GroundSort<Rc<Sort>> {
+    fn sort_bool(&self) -> GroundSort<Arc<Sort>> {
         self.sort_bool.clone()
     }
 }
@@ -443,8 +509,8 @@ impl smt2::Server for Environment {
         use engine::Result::*;
         loop {
             match self.engine.check()? {
-                None => return Ok(smt2::response::CheckSat::Sat),
-                Some(Sat) => return Ok(smt2::response::CheckSat::Unsat),
+                None => return Ok(smt2::response::CheckSat::Unsat),
+                Some(Sat) => return Ok(smt2::response::CheckSat::Sat),
                 Some(Unknown) => return Ok(smt2::response::CheckSat::Unknown),
                 Some(Unsat(new_constraint)) => {
                     for c in new_constraint {
@@ -456,7 +522,7 @@ impl smt2::Server for Environment {
     }
 
     /// Declare a new constant.
-    fn declare_const(&mut self, _id: &Ident, _sort: &GroundSort<Rc<Sort>>) -> Result<()> {
+    fn declare_const(&mut self, _id: &Ident, _sort: &GroundSort<Arc<Sort>>) -> Result<()> {
         Ok(())
     }
 
@@ -464,10 +530,10 @@ impl smt2::Server for Environment {
     /// The sort starts undefined, so it cannot be used before [`define_sort`] is called to
     /// define the structure of the ADT.
     fn declare_sort(&mut self, decl: &smt2::SortDeclaration<Self>) -> Result<()> {
-        self.register_sort(Rc::new(Sort {
+        self.register_sort(Arc::new(Sort {
             id: decl.id.clone(),
             arity: decl.arity,
-            def: RefCell::new(None) // undefined.
+            def: RwLock::new(None) // undefined.
         }));
 
         Ok(())
@@ -477,7 +543,8 @@ impl smt2::Server for Environment {
     fn define_sort(&mut self, id: &Ident, def: &smt2::DataTypeDeclaration<Self>) -> Result<()> {
         match self.sorts.get(id) {
             Some(sort) => {
-                sort.def.replace(Some(def.clone()));
+                let mut sort_def = sort.def.write().unwrap();
+                *sort_def = Some(def.clone());
                 for (i, cons) in def.constructors.iter().enumerate() {
                     self.functions.insert(cons.id.clone(), Function::Constructor(sort.clone(), i));
                 }
@@ -491,14 +558,16 @@ impl smt2::Server for Environment {
     }
 
     /// Declare new function.
-    fn declare_fun(&mut self, id: &Ident, args: &Vec<GroundSort<Rc<Sort>>>, return_sort: &GroundSort<Rc<Sort>>) -> Result<()> {
+    fn declare_fun(&mut self, id: &Ident, args: &Vec<GroundSort<Arc<Sort>>>, return_sort: &GroundSort<Arc<Sort>>) -> Result<()> {
         if *return_sort != self.sort_bool {
             Err(Error::InvalidPredicateReturnType)
         } else {
-            let p = Predicate {
+            let p = Rc::new(Predicate {
+                id: id.clone(),
                 args: args.clone()
-            };
-            self.functions.insert(id.clone(), Function::Predicate(Rc::new(p)));
+            });
+            self.functions.insert(id.clone(), Function::Predicate(p.clone()));
+            self.engine.declare_predicate(p)?;
             Ok(())
         }
     }
