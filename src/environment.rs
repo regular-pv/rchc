@@ -1,15 +1,24 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::hash::{Hash, Hasher};
 use std::rc::Rc;
-use std::cell::Cell;
+use std::cell::UnsafeCell;
 use std::sync::{Arc, RwLock};
 use std::borrow::Borrow;
 use std::fmt;
 
 use smt2::GroundSort;
 use terms::Pattern;
-use ta::{bottom_up::Automaton, combinations, NoLabel, Ranked};
-use automatic::{Convoluted, MaybeBottom};
+use ta::{
+    bottom_up::{
+        Automaton,
+        Configuration
+    },
+    combinations,
+    NoLabel,
+    Ranked,
+    Rank
+};
+use automatic::{Convoluted, MaybeBottom, convolution::aligned};
 
 use crate::{Error, Result, Sorted, rich::*, engine, utils::*};
 
@@ -67,43 +76,71 @@ impl Hash for TypedConstructor {
 
 impl fmt::Display for TypedConstructor {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{}", self.sort)
+        let guard = self.sort.sort.def.read().unwrap();
+        if let Some(def) = &*guard {
+            if let Some(cons) = def.constructors.get(self.n) {
+                write!(f, "{}", cons.id)
+            } else {
+                write!(f, "{}.{}!", self.sort, self.n)
+            }
+        } else {
+            write!(f, "{}.{}", self.sort, self.n)
+        }
     }
 }
 
-#[derive(Clone, Hash, PartialEq, Eq, Debug)]
-pub struct ConvolutedSort(pub Vec<MaybeBottom<GroundSort<Arc<crate::Sort>>>>);
+pub type ConvolutedSort = Convoluted<GroundSort<Arc<crate::Sort>>>;
 
-impl ConvolutedSort {
-    pub fn automaton(&self) -> Automaton<TypedConstructor, ConvolutedSort, NoLabel> {
-        // let defs = self.0.iter().map(|sort| {
-        //     match sort {
-        //         MaybeBottom::Bottom => None,
-        //         MaybeBottom::Some(sort) => Some(sort.def.read().unwrap())
-        //     }
-        // });
-        //
-        // for convoluted_cons in combinations(&defs, |def| {
-        //     match def {
-        //         Some(Some(d)) => {
-        //             let def = d.unwrap();
-        //             def.constructors.iter()
-        //         },
-        //         Some(None) => panic!("datatype is not yet defined!"),
-        //         None => {
-        //             panic!("None")
-        //         }
-        //     }
-        // }) {
-        //     //
-        // }
-        panic!("TODO compute convoluted sort automaton!")
+pub struct GroundSortConfigurations {
+    gsort: GroundSort<Arc<Sort>>,
+    current_constructor: usize
+}
+
+impl GroundSortConfigurations {
+    pub fn new(gsort: &GroundSort<Arc<Sort>>) -> GroundSortConfigurations {
+        GroundSortConfigurations {
+            gsort: gsort.clone(),
+            current_constructor: 0
+        }
     }
 }
 
-impl fmt::Display for ConvolutedSort {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{}", PList(&self.0, "⊗"))
+impl Iterator for GroundSortConfigurations {
+    type Item = Configuration<TypedConstructor, GroundSort<Arc<Sort>>>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let i = self.current_constructor;
+        match &*self.gsort.sort.def.read().unwrap() {
+            Some(def) => {
+                if let Some(constructor) = def.constructors.get(i) {
+                    self.current_constructor += 1;
+                    let f = TypedConstructor {
+                        sort: self.gsort.clone(),
+                        n: i,
+                        arity: constructor.selectors.len()
+                    };
+
+                    let mut states = Vec::with_capacity(f.arity);
+                    for sel in &constructor.selectors {
+                        match sel.sort.instanciate(&self.gsort.parameters) {
+                            Ok(gsort) => states.push(gsort),
+                            Err(_) => panic!("malformed ground sort!")
+                        }
+                    }
+
+                    Some(Configuration(f, states))
+                } else {
+                    None
+                }
+            },
+            None => None
+        }
+    }
+}
+
+impl ta::bottom_up::LanguageState<TypedConstructor, ()> for GroundSort<Arc<Sort>> {
+    fn configurations<'a>(&self, env: &'a ()) -> Box<dyn Iterator<Item = Configuration<TypedConstructor, Self>> + 'a> {
+        Box::new(GroundSortConfigurations::new(self))
     }
 }
 
@@ -234,22 +271,41 @@ impl smt2::Function<Environment> for Function {
     }
 }
 
+struct PredicateData {
+    domain: Automaton<Rank<Convoluted<TypedConstructor>>, ConvolutedSort, NoLabel>,
+    alphabet: HashSet<Rank<Convoluted<TypedConstructor>>>
+}
+
 pub struct Predicate {
     id: Ident,
     args: Vec<GroundSort<Arc<Sort>>>,
-    domain: RefCell<Option<Automaton<TypedConstructor, ConvolutedSort, NoLabel>>>
+    data: UnsafeCell<Option<PredicateData>>
 }
 
 impl Predicate {
-    fn domain(&self) -> Ref<Automaton<TypedConstructor, ConvolutedSort, NoLabel>> {
-        match self.domain.get() {
-            Some(aut) => aut,
+    fn data(&self) -> &PredicateData {
+        let data = unsafe { &mut *self.data.get() };
+        match data {
+            Some(data) => data,
             None => {
-                let convoluted_sort = ConvolutedSort(self.args.iter().map(|sort| MaybeBottom::Some(sort.clone())).collect());
-                self.domain.set(convoluted_sort.automaton());
-                self.domain.borrow().as_ref().unwrap()
+                let convoluted_sort = Convoluted(self.args.iter().map(|sort| MaybeBottom::Some(sort.clone())).collect());
+                let domain = aligned::automaton::state_convolution(convoluted_sort, &());
+                let alphabet = domain.alphabet();
+                *data = Some(PredicateData {
+                    domain: domain,
+                    alphabet: alphabet
+                });
+                data.as_ref().unwrap()
             }
         }
+    }
+
+    pub fn domain(&self) -> &Automaton<Rank<Convoluted<TypedConstructor>>, ConvolutedSort, NoLabel> {
+        &self.data().domain
+    }
+
+    pub fn alphabet(&self) -> &HashSet<Rank<Convoluted<TypedConstructor>>> {
+        &self.data().alphabet
     }
 }
 
@@ -287,6 +343,11 @@ impl smt2::Function<Environment> for Predicate {
         }
         Ok(env.sort_bool.clone())
     }
+}
+
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub enum Constant {
+    // no constants.
 }
 
 /// Regular CHC solver environement.
@@ -405,6 +466,7 @@ impl Environment {
 impl smt2::Environment for Environment {
     type Logic = Logic;
     type Ident = Ident;
+    type Constant = Constant;
     type Sort = Arc<Sort>;
     type Function = Function;
     type Error = Error;
@@ -420,6 +482,10 @@ impl smt2::Environment for Environment {
     /// The Bool sort.
     fn sort_bool(&self) -> GroundSort<Arc<Sort>> {
         self.sort_bool.clone()
+    }
+
+    fn const_sort(&self, cst: &Constant) -> GroundSort<Arc<Sort>> {
+        panic!("TODO const_sort")
     }
 }
 
@@ -564,7 +630,8 @@ impl smt2::Server for Environment {
         } else {
             let p = Rc::new(Predicate {
                 id: id.clone(),
-                args: args.clone()
+                args: args.clone(),
+                data: UnsafeCell::new(None)
             });
             self.functions.insert(id.clone(), Function::Predicate(p.clone()));
             self.engine.declare_predicate(p)?;

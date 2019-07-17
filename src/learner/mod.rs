@@ -7,13 +7,14 @@ use std::collections::HashMap;
 use std::hash::Hash;
 use std::fmt;
 use terms::Term;
+use ta::Rank;
 use automatic::Convoluted;
 
 pub mod smt;
 pub use smt::SMTLearner;
 
 /// Learning sample.
-pub struct Sample<P, F>(P, Term<Convoluted<F>>);
+pub struct Sample<P, F>(pub P, pub Term<Rank<Convoluted<F>>>);
 
 /// Learning constraints.
 pub enum Constraint<F, P> {
