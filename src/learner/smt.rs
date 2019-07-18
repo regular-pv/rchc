@@ -8,16 +8,20 @@ use ta::{
     NoLabel,
     Symbol,
     Rank,
+    SortedWith,
     bottom_up::{Automaton, Configuration}
 };
 use automatic::{Convolution, Convoluted, MaybeBottom};
-use smt2::{Server, Environment, client::FunctionSignature, GroundSort};
-use crate::{Sorted, ConvolutedSort};
+use smt2::{Server, Environment, client::{FunctionSignature, Constant, Sorted}, GroundSort};
+use crate::{ConvolutedSort};
 use crate::utils::PList;
+use crate::teacher::explorer::Relation;
 
 use super::{Learner, Constraint, Sample};
 
 pub trait Predicate = Clone + Eq + Hash + fmt::Display;
+
+
 
 pub type Result<T, K: Clone + PartialEq, P: Predicate> = std::result::Result<T, Error<K, P>>;
 
@@ -36,7 +40,7 @@ impl<K: Clone + PartialEq, P: Predicate> From<SolverError<K, P>> for Error<K, P>
 impl<K: Clone + PartialEq, P: Predicate> fmt::Display for Error<K, P> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            Error::Solver(e) => write!(f, "{}", e),
+            Error::Solver(e) => write!(f, "SMT-solver: {}", e),
             // Error::Unsat => write!(f, "SMT-solver response to (check-sat) was `unsat`"),
             Error::Unknown => write!(f, "SMT-solver response to (check-sat) was `unknown`")
         }
@@ -49,7 +53,9 @@ pub enum Function<P: Predicate> {
     False,
     Eq,
     Not,
+    And,
     Or,
+    Implies,
     Q(ConvolutedSort, u32),
     Predicate(P)
 }
@@ -61,7 +67,9 @@ impl<P: Predicate + fmt::Display> fmt::Display for Function<P> {
             Function::False => write!(f, "false"),
             Function::Eq => write!(f, "="),
             Function::Not => write!(f, "not"),
+            Function::And => write!(f, "and"),
             Function::Or => write!(f, "or"),
+            Function::Implies => write!(f, "=>"),
             Function::Q(sort, i) => write!(f, "q{}:{}", i, sort),
             Function::Predicate(p) => write!(f, "p{}", p)
         }
@@ -101,7 +109,7 @@ pub struct SMTLearner<K: Clone + PartialEq, F: Symbol, P: Predicate, C: Convolut
     c: PhantomData<C>
 }
 
-pub trait Constructor = Symbol + Eq + Hash + Sorted<GroundSort<Arc<crate::Sort>>>;
+pub trait Constructor = Symbol + Eq + Hash + SortedWith<GroundSort<Arc<crate::Sort>>>;
 
 /// States of the abstract automaton.
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
@@ -109,7 +117,7 @@ pub struct AbsQ(ConvolutedSort, u32);
 
 impl fmt::Display for AbsQ {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{}", self.0)
+        write!(f, "q{}:{}", self.1, self.0)
     }
 }
 
@@ -139,13 +147,15 @@ impl Namespace {
     }
 }
 
-impl<K: Clone + PartialEq + fmt::Display, F: Constructor, P: Predicate, C: Convolution<F>> SMTLearner<K, F, P, C> {
+impl<K: Constant + fmt::Display, F: Constructor, P: Predicate, C: Convolution<F>> SMTLearner<K, F, P, C> {
     pub fn new(mut solver: Solver<K, P>) -> SMTLearner<K, F, P, C> {
         let const_sort = smt2::GroundSort::new(Sort::Q);
         solver.declare_sort(Sort::Q);
-        solver.predefined_fun("=", Function::Eq, FunctionSignature::LogicBinary);
+        solver.predefined_fun("=", Function::Eq, FunctionSignature::Equality);
         solver.predefined_fun("not", Function::Not, FunctionSignature::LogicUnary);
+        solver.predefined_fun("and", Function::And, FunctionSignature::LogicNary);
         solver.predefined_fun("or", Function::Or, FunctionSignature::LogicNary);
+        solver.predefined_fun("=>", Function::Implies, FunctionSignature::LogicBinary);
         SMTLearner {
             automaton: Vec::new(),
             namespace: Namespace::new(),
@@ -169,7 +179,6 @@ impl<K: Clone + PartialEq + fmt::Display, F: Constructor, P: Predicate, C: Convo
     }
 
     fn declare_transition(&mut self, predicate: u32, Configuration(f, states): &Configuration<Rank<Convoluted<F>>, AbsQ>, q: AbsQ) -> Result<(), K, P> {
-        self.solver.declare_const(q.as_fun(), &self.const_sort)?;
         for (Configuration(other_f, other_states), _, other_q) in self.automaton[predicate as usize].transitions() {
             if f == other_f {
                 let mut clause = vec![self.op(Function::Eq, vec![self.as_term(&q), self.as_term(other_q)])];
@@ -178,7 +187,8 @@ impl<K: Clone + PartialEq + fmt::Display, F: Constructor, P: Predicate, C: Convo
                     clause.push(self.op(Function::Not, vec![self.op(Function::Eq, vec![self.as_term(sub_state), self.as_term(&other_sub_state)])]));
                 }
 
-                self.solver.assert(&self.op(Function::Or, clause))?
+                let term = self.op(Function::Or, clause);
+                self.solver.assert(&term)?
             }
         }
 
@@ -204,7 +214,11 @@ impl<K: Clone + PartialEq + fmt::Display, F: Constructor, P: Predicate, C: Convo
             (q, NoLabel)
         });
 
-        for (configuration, q) in new_transitons.drain(..) {
+        for (configuration, q) in &new_transitons {
+            self.solver.declare_const(q.as_fun(), &self.const_sort)?;
+        }
+
+        for (configuration, q) in new_transitons.into_iter() {
             self.declare_transition(predicate, &configuration, q)?
         }
 
@@ -220,30 +234,58 @@ impl<K: Clone + PartialEq + fmt::Display, F: Constructor, P: Predicate, C: Convo
         Ok(())
     }
 
-    fn assert_negative(&mut self, states: &[AbsQ]) -> Result<(), K, P> {
-        panic!("TODO assert_negative")
+    fn assert_negative(&mut self, states: &[(P, AbsQ)]) -> Result<(), K, P> {
+        self.solver.assert(&self.op(Function::Not, vec![
+            self.op(Function::And, states.iter().map(|(p, q)| {
+                self.op(Function::Predicate(p.clone()), vec![self.as_term(&q)])
+            }).collect())
+        ]))?;
+        Ok(())
     }
 
-    fn assert_implication(&mut self, lhs: &[AbsQ], rhs: AbsQ) -> Result<(), K, P> {
-        panic!("TODO assert_implication")
+    fn assert_implication(&mut self, lhs: &[(P, AbsQ)], rhs: (P, AbsQ)) -> Result<(), K, P> {
+        self.solver.assert(&self.op(Function::Implies, vec![
+            self.op(Function::And, lhs.iter().map(|(p, q)| {
+                self.op(Function::Predicate(p.clone()), vec![self.as_term(&q)])
+            }).collect()),
+            self.op(Function::Predicate(rhs.0.clone()), vec![self.as_term(&rhs.1)])
+        ]))?;
+        Ok(())
     }
 
-    fn decode_predicate_definition(final_states: &mut HashSet<u32>, term: &smt2::Term<Solver<K, P>>) {
-        match term {
-            smt2::Term::Apply { fun, .. } => {
-                match fun {
-                    Function::False => (),
-                    _ => panic!("TODO decode predicate definition")
-                }
-            },
-            _ => panic!("TODO decode predicate definition")
+    fn is_final_state(state: u32, term: &smt2::Term<Solver<K, P>>) -> bool {
+        #[derive(PartialEq)]
+        enum Value {
+            Q(u32),
+            Bool(bool)
         }
+
+        fn eval<K: Constant, P: Predicate>(state: u32, term: &smt2::Term<Solver<K, P>>) -> Value {
+            match term {
+                smt2::Term::Var { .. } => Value::Q(state),
+                smt2::Term::Const(Sorted(cst, _)) => {
+                    Value::Q(cst.index())
+                },
+                smt2::Term::Apply { fun: Function::True, .. } => {
+                    Value::Bool(true)
+                },
+                smt2::Term::Apply { fun: Function::False, .. } => {
+                    Value::Bool(false)
+                },
+                smt2::Term::Apply { fun: Function::Eq, args, .. } => {
+                    Value::Bool(eval(state, &args[0]) == eval(state, &args[1]))
+                },
+                _ => panic!("invalid state definition term! It may also be unsupported.")
+            }
+        }
+
+        eval(state, term) == Value::Bool(true)
     }
 }
 
 /// Learner trait.
-impl<K: Clone + PartialEq + fmt::Display, F: Constructor, P: Predicate, C: Convolution<F>> Learner<F, P, Automaton<Rank<Convoluted<F>>, Q, NoLabel>> for SMTLearner<K, F, P, C> {
-    type Model = HashMap<P, Automaton<Rank<Convoluted<F>>, Q, NoLabel>>;
+impl<K: Constant + fmt::Display, F: Constructor, P: Predicate, C: Convolution<F>> Learner<F, P, Relation<F, Q, C>> for SMTLearner<K, F, P, C> {
+    type Model = HashMap<P, Relation<F, Q, C>>;
     type Error = Error<K, P>;
 
     /// Declare a new predicate to learn.
@@ -266,17 +308,20 @@ impl<K: Clone + PartialEq + fmt::Display, F: Constructor, P: Predicate, C: Convo
             Constraint::Negative(mut samples) => {
                 let mut states = Vec::with_capacity(samples.len());
                 for s in samples.drain(..) {
-                    states.push(self.add_sample(s)?)
+                    let p = s.0.clone();
+                    states.push((p, self.add_sample(s)?))
                 }
                 self.assert_negative(&states)
             },
             Constraint::Implication(mut lhs, rhs) => {
                 let mut lhs_states = Vec::with_capacity(lhs.len());
-                for s in lhs.drain(..) {
-                    lhs_states.push(self.add_sample(s)?)
+                for s in lhs.into_iter() {
+                    let p = s.0.clone();
+                    lhs_states.push((p, self.add_sample(s)?))
                 }
+                let rhs_p = rhs.0.clone();
                 let rhs_state = self.add_sample(rhs)?;
-                self.assert_implication(&lhs_states, rhs_state)
+                self.assert_implication(&lhs_states, (rhs_p, rhs_state))
             }
         }
     }
@@ -288,27 +333,57 @@ impl<K: Clone + PartialEq + fmt::Display, F: Constructor, P: Predicate, C: Convo
                 let smt_model = self.solver.get_model()?;
                 let mut model = HashMap::new();
 
-                for def in smt_model.definitions.iter() {
-                    for (i, decl) in def.declarations.iter().enumerate() {
-                        let body = &def.bodies[i];
-                        match &decl.f {
+                let mut table = HashMap::new();
+                let mut predicates_defs: Vec<(P, smt2::Term<Solver<K, P>>)> = Vec::new();
+
+                for mut def in smt_model.definitions.into_iter() {
+                    def.bodies.reverse();
+                    for decl in def.declarations.into_iter() {
+                        let body = def.bodies.pop().unwrap();
+                        match decl.f {
                             Function::Q(sort, i) => {
-                                panic!("TODO abs-q defintion")
+                                match body {
+                                    smt2::Term::Const(Sorted(c, _)) => {
+                                        table.insert(i, c.index());
+                                    },
+                                    _ => panic!("unexpected state definition!")
+                                }
                             },
                             Function::Predicate(p) => {
-                                let mut final_states = HashSet::new();
-                                Self::decode_predicate_definition(&mut final_states, body);
-
-                                let mut aut = Automaton::new();
-                                for final_q in &final_states {
-                                    panic!("TODO add final state");
-                                }
-
-                                model.insert(p.clone(), aut);
+                                predicates_defs.push((p.clone(), body));
                             },
                             _ => ()
                         }
                     }
+                }
+
+                for (p, body) in &predicates_defs {
+                    let i = self.predicate_id(p) as usize;
+                    let abs_aut = &self.automaton[i];
+                    // println!("-----------");
+                    // println!("abs_aut: {}", abs_aut);
+                    //let mut final_states = HashSet::new();
+                    let mut aut = abs_aut.map_states(|AbsQ(sort, k)| {
+                        Q::Alive(sort.clone(), *table.get(k).unwrap())
+                    });
+
+                    let mut final_states = HashSet::new();
+                    for q in aut.states() {
+                        if let Q::Alive(sort, k) = q {
+                            if Self::is_final_state(*k, body) {
+                                final_states.insert(q.clone());
+                            }
+                        }
+                    }
+
+                    for q in final_states.into_iter() {
+                        aut.set_final(q);
+                    }
+
+                    // println!("aut: {}", aut);
+                    // println!("-----------");
+
+                    model.insert(p.clone(), Relation(aut, PhantomData));
                 }
 
                 Ok(Some(model))

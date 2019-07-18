@@ -16,11 +16,12 @@ use ta::{
     combinations,
     NoLabel,
     Ranked,
-    Rank
+    Rank,
+    SortedWith
 };
 use automatic::{Convoluted, MaybeBottom, convolution::aligned};
 
-use crate::{Error, Result, Sorted, rich::*, engine, utils::*};
+use crate::{Error, Result, rich::*, engine, utils::*};
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum Logic {
@@ -47,7 +48,7 @@ pub struct TypedConstructor {
     arity: usize
 }
 
-impl Sorted<GroundSort<Arc<Sort>>> for TypedConstructor {
+impl SortedWith<GroundSort<Arc<Sort>>> for TypedConstructor {
     fn sort(&self) -> &GroundSort<Arc<Sort>> {
         &self.sort
     }
@@ -513,6 +514,10 @@ impl smt2::Compiler for Environment {
         }
     }
 
+    fn constant(&self, _id: &Ident) -> Option<Constant> {
+        None
+    }
+
     /// Find a function.
     fn function(&self, id: &Ident) -> Option<Function> {
         // match id.as_str() {
@@ -546,6 +551,12 @@ impl smt2::Server for Environment {
                     Apply { fun: Function::Implies, args, .. } => {
                         let body = self.decode_body(&args[0])?;
                         let head = self.decode_expr(&args[1])?;
+                        self.register_clause(Clause::new(body, head))?;
+                        Ok(())
+                    },
+                    Apply { fun: Function::Not, args, .. } => {
+                        let body = self.decode_body(&args[0])?;
+                        let head = Expr::False;
                         self.register_clause(Clause::new(body, head))?;
                         Ok(())
                     },
@@ -645,7 +656,11 @@ impl smt2::Server for Environment {
     }
 
     fn get_model(&mut self) -> Result<smt2::response::Model<Self>> {
-        panic!("TODO Environment::get_model")
+        if let Some(model) = self.engine.produce_model() {
+            panic!("TODO Environment::get_model")
+        } else {
+            Err(Error::NoModel)
+        }
     }
 
     /// Set the solver's logic.

@@ -8,6 +8,9 @@ pub enum Error {
     /// For non-Bool predicates.
     InvalidPredicateReturnType,
 
+    /// Model is not ready
+    NoModel,
+
     Engine(crate::engine::Error)
 }
 
@@ -25,6 +28,7 @@ impl fmt::Display for Error {
         match self {
             InvalidAssertion => write!(f, "invalid assertion"),
             InvalidPredicateReturnType => write!(f, "invalid predicate return type"),
+            NoModel => write!(f, "model is not ready"),
             Engine(e) => write!(f, "engine: {}", e)
         }
     }

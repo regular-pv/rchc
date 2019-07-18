@@ -1,4 +1,4 @@
-#![feature(trait_alias)]
+#![feature(trait_alias, type_alias_enum_variants)]
 
 #[macro_use]
 extern crate log;
@@ -22,6 +22,6 @@ pub use teacher::Teacher;
 pub use learner::{Learner, Model};
 pub use engine::Engine;
 
-pub trait Sorted<S> {
-    fn sort(&self) -> &S;
-}
+// pub trait SortedWith<S> {
+//     fn sort(&self) -> &S;
+// }

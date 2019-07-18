@@ -1,5 +1,8 @@
 use std::marker::PhantomData;
 use std::fmt;
+use std::collections::HashMap;
+use automatic::Convoluted;
+use ta::Symbol;
 use crate::{Learner, Teacher, Model, rich};
 use crate::learner::{Sample, Constraint};
 pub use crate::teacher::Result;
@@ -19,7 +22,13 @@ impl fmt::Display for Error {
     }
 }
 
-pub trait Abstract<F: Clone, P: Clone> {
+pub type Instance<F> = ta::alternating::Automaton<Convoluted<F>, u32, Convoluted<u32>>;
+
+pub trait ToInstance<F: Symbol> {
+    fn to_instance(&self) -> Instance<F>;
+}
+
+pub trait Abstract<F: Symbol, P: Clone> {
     /// Declare a new predicate to solve.
     fn declare_predicate(&mut self, p: P) -> std::result::Result<(), Error>;
 
@@ -31,24 +40,29 @@ pub trait Abstract<F: Clone, P: Clone> {
 
     /// Add a learning constraint.
     fn add(&mut self, new_constraint: Constraint<F, P>) -> std::result::Result<(), Error>;
+
+    /// Produce model.
+    fn produce_model(&self) -> Option<HashMap<P, Instance<F>>>;
 }
 
-pub struct Engine<F: Clone, P: Clone, I, L, T, M> where M: Model<P, I>, L: Learner<F, P, I, Model=M>, T: Teacher<F, P, I, Model=M> {
+pub struct Engine<F: Symbol, P: Clone, I, L, T, M> where M: Model<P, I>, L: Learner<F, P, I, Model=M>, T: Teacher<F, P, I, Model=M> {
     learner: L,
     teacher: T,
+    predicates: Vec<P>,
+    model: Option<L::Model>,
     _f: PhantomData<F>,
-    _p: PhantomData<P>,
     _i: PhantomData<I>,
     _m: PhantomData<M>
 }
 
-impl<F: Clone, P: Clone, I, L, T, M> Engine<F, P, I, L, T, M> where M: Model<P, I>, L: Learner<F, P, I, Model=M>, T: Teacher<F, P, I, Model=M> {
+impl<F: Symbol, P: Clone, I, L, T, M> Engine<F, P, I, L, T, M> where M: Model<P, I>, L: Learner<F, P, I, Model=M>, T: Teacher<F, P, I, Model=M> {
     pub fn new(learner: L, teacher: T) -> Engine<F, P, I, L, T, M> {
         Engine {
             learner: learner,
             teacher: teacher,
+            predicates: Vec::new(),
+            model: None,
             _f: PhantomData,
-            _p: PhantomData,
             _i: PhantomData,
             _m: PhantomData
         }
@@ -75,9 +89,10 @@ impl<F: Clone, P: Clone, I, L, T, M> Engine<F, P, I, L, T, M> where M: Model<P, 
     }
 }
 
-impl<F: Clone, P: Clone, I, L, T, M> Abstract<F, P> for Engine<F, P, I, L, T, M> where M: Model<P, I>, L: Learner<F, P, I, Model=M>, T: Teacher<F, P, I, Model=M> {
+impl<F: Symbol, P: Clone, I: ToInstance<F>, L, T, M> Abstract<F, P> for Engine<F, P, I, L, T, M> where M: Model<P, I>, L: Learner<F, P, I, Model=M>, T: Teacher<F, P, I, Model=M>, P: fmt::Display, I: fmt::Display {
     /// Declare a new predicate to solve.
     fn declare_predicate(&mut self, p: P) -> std::result::Result<(), Error> {
+        self.predicates.push(p.clone());
         Self::learner_result(self.learner.declare_predicate(p))
     }
 
@@ -88,8 +103,9 @@ impl<F: Clone, P: Clone, I, L, T, M> Abstract<F, P> for Engine<F, P, I, L, T, M>
 
     /// Find the next model and check it.
     fn check(&mut self) -> std::result::Result<Option<Result<F, P>>, Error> {
-        match Self::learner_result(self.learner.produce_model())? {
-            Some(model) => Ok(Some(Self::teacher_result(self.teacher.check(&model))?)),
+        self.model = Self::learner_result(self.learner.produce_model())?;
+        match &self.model {
+            Some(model) => Ok(Some(Self::teacher_result(self.teacher.check(model))?)),
             None => Ok(None)
         }
     }
@@ -97,5 +113,17 @@ impl<F: Clone, P: Clone, I, L, T, M> Abstract<F, P> for Engine<F, P, I, L, T, M>
     /// Add a learning constraint.
     fn add(&mut self, new_constraint: Constraint<F, P>) -> std::result::Result<(), Error> {
         Self::learner_result(self.learner.add(new_constraint))
+    }
+
+    fn produce_model(&self) -> Option<HashMap<P, Instance<F>>> {
+        if let Some(model) = &self.model {
+            for p in &self.predicates {
+                let instante = model.get(p).to_instance();
+                //println!("{}: {}", p, model.get(p));
+            }
+            panic!("TODO model");
+        } else {
+            None
+        }
     }
 }

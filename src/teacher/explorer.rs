@@ -4,11 +4,14 @@ use std::rc::Rc;
 use std::sync::Arc;
 use std::fmt;
 use std::cell::Cell;
+use std::marker::PhantomData;
 use terms::{
     Pattern,
     Var
 };
 use ta::{
+    Symbol,
+    State,
     Rank,
     NoLabel,
     bottom_up::{Automaton},
@@ -16,12 +19,7 @@ use ta::{
 use automatic::{
     Convoluted,
     Convolution,
-    MaybeBottom,
-    convolution::aligned::{
-        self,
-        AlignedConvolutedPattern,
-        multi_search
-    }
+    MaybeBottom
 };
 use crate::{
     rich,
@@ -42,19 +40,42 @@ impl fmt::Display for Error {
 type F = TypedConstructor;
 type P = Rc<Predicate>;
 
+pub struct Relation<F: Symbol, Q: State, C: Convolution<F>>(pub Automaton<Rank<Convoluted<F>>, Q, NoLabel>, pub PhantomData<C>);
+
+impl<F: Symbol + fmt::Display, Q: State + fmt::Display, C: Convolution<F>> fmt::Display for Relation<F, Q, C> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+impl<F: Symbol, Q: State, C: Convolution<F>> crate::engine::ToInstance<F> for Relation<F, Q, C> {
+    fn to_instance(&self) -> crate::engine::Instance<F> {
+        let alt = C::generic_automaton(&self.0);
+
+        let mut map = HashMap::new();
+        for (i, q) in alt.states().enumerate() {
+            map.insert(q.clone(), i as u32);
+        }
+
+        alt.map_states(|q| *map.get(q).unwrap())
+    }
+}
+
 /// A simple teacher that explores automata runs to check guesses.
-pub struct Explorer {
+pub struct Explorer<C: Convolution<F>> {
     /// Known predicate, and their assigned index.
     predicates: HashMap<P, usize>,
 
     /// Known CHC clauses.
     clauses: Vec<Clause>,
+
+    c: PhantomData<C>
 }
 
 pub enum Expr {
     True,
     False,
-    Apply(P, usize, AlignedConvolutedPattern<F, usize>)
+    Apply(P, usize, Convoluted<Pattern<F, usize>>)
 }
 
 pub struct Clause {
@@ -62,11 +83,12 @@ pub struct Clause {
     head: Expr
 }
 
-impl Explorer {
-    pub fn new() -> Explorer {
+impl<C: Convolution<F>> Explorer<C> {
+    pub fn new() -> Explorer<C> {
         Explorer {
             predicates: HashMap::new(),
-            clauses: Vec::new()
+            clauses: Vec::new(),
+            c: PhantomData
         }
     }
 
@@ -96,7 +118,7 @@ impl Explorer {
                 };
 
                 let patterns = patterns.into_iter().map(|p| MaybeBottom::Some(p)).collect();
-                let convoluted_pattern = AlignedConvolutedPattern(patterns);
+                let convoluted_pattern = Convoluted(patterns);
                 Expr::Apply(p.clone(), index, convoluted_pattern)
             }
         }
@@ -145,8 +167,8 @@ impl fmt::Display for Q {
     }
 }
 
-impl Teacher<F, P, Automaton<Rank<Convoluted<F>>, Q, NoLabel>> for Explorer {
-    type Model = HashMap<P, Automaton<Rank<Convoluted<F>>, Q, NoLabel>>;
+impl<C: Convolution<F>> Teacher<F, P, Relation<F, Q, C>> for Explorer<C> {
+    type Model = HashMap<P, Relation<F, Q, C>>;
     type Error = Error;
 
     /// Add a new clause to the solver.
@@ -170,6 +192,8 @@ impl Teacher<F, P, Automaton<Rank<Convoluted<F>>, Q, NoLabel>> for Explorer {
     /// If it is found to be unsat, gives a non-empty set of learning constraints violated by
     /// the model.
     fn check<'a>(&mut self, model: &'a Self::Model) -> std::result::Result<Result<F, P>, Error> {
+        // println!("NEW CHECK");
+
         let mut automata: Vec<&'a Automaton<Rank<Convoluted<F>>, Q, NoLabel>> = Vec::with_capacity(self.predicates.len());
 
         for _ in 0..self.predicates.len() {
@@ -180,7 +204,7 @@ impl Teacher<F, P, Automaton<Rank<Convoluted<F>>, Q, NoLabel>> for Explorer {
 
         for (p, aut) in model.iter() {
             if let Some(i) = self.index_of(p) {
-                automata[i] = aut;
+                automata[i] = &aut.0;
             }
             // non-indexed predicates are not important.
         }
@@ -195,7 +219,9 @@ impl Teacher<F, P, Automaton<Rank<Convoluted<F>>, Q, NoLabel>> for Explorer {
 
                 match &clause.head {
                     Expr::True => panic!("todo Expr::True"),
-                    Expr::False => panic!("todo Expr::False"),
+                    Expr::False => {
+                        head_automaton = Automaton::new();
+                    },
                     Expr::Apply(p, p_index, pattern) => {
                         let domain = p.domain();
                         let alphabet = domain.alphabet();
@@ -226,7 +252,7 @@ impl Teacher<F, P, Automaton<Rank<Convoluted<F>>, Q, NoLabel>> for Explorer {
 
                 match &clause.head {
                     Expr::True => panic!("todo Expr::True"),
-                    Expr::False => panic!("todo Expr::False"),
+                    Expr::False => (),
                     Expr::Apply(p, p_index, pattern) => {
                         clause_automata.push(&head_automata[k]);
                         patterns.push(pattern.clone());
@@ -244,8 +270,8 @@ impl Teacher<F, P, Automaton<Rank<Convoluted<F>>, Q, NoLabel>> for Explorer {
                     let namespace: Cell<usize> = Cell::new(0);
                     let namespace_ref = &namespace;
 
-                    let searchable_patterns: Vec<AlignedConvolutedPattern<TypedConstructor, Var<usize>>> = patterns.into_iter().map(|pattern| {
-                        AlignedConvolutedPattern(pattern.0.into_iter().map(|conv_pattern| {
+                    let searchable_patterns: Vec<Convoluted<Pattern<TypedConstructor, Var<usize>>>> = patterns.into_iter().map(|pattern| {
+                        Convoluted(pattern.0.into_iter().map(|conv_pattern| {
                             if let MaybeBottom::Some(conv_pattern) = conv_pattern {
                                 MaybeBottom::Some(conv_pattern.map_variables(&mut |x| {
                                     let max_id = namespace_ref.get();
@@ -262,12 +288,12 @@ impl Teacher<F, P, Automaton<Rank<Convoluted<F>>, Q, NoLabel>> for Explorer {
                     }).collect();
 
                     {
-                        let terms = multi_search(&clause_automata, searchable_patterns).next();
-                        // if let Some(terms) = terms {
-                        //     println!("found {}", crate::utils::PList(&terms, ","));
-                        // } else {
-                        //     println!("empty");
-                        // }
+                        let terms = C::search(&clause_automata, searchable_patterns).next();
+                        if let Some(terms) = &terms {
+                            println!("found {}", crate::utils::PList(&terms, ","));
+                        } else {
+                            println!("empty");
+                        }
                         terms
                     }
                     //None
@@ -282,7 +308,7 @@ impl Teacher<F, P, Automaton<Rank<Convoluted<F>>, Q, NoLabel>> for Explorer {
                     let clause = &self.clauses[i];
 
                     if clause.body.is_empty() {
-                        // positive example
+                        // positive example.
                         if let Expr::Apply(p, _, _) = &clause.head {
                             let sample = convoluted_terms.pop().unwrap();
                             let constraint = Constraint::Positive(Sample(p.clone(), sample));
@@ -291,7 +317,47 @@ impl Teacher<F, P, Automaton<Rank<Convoluted<F>>, Q, NoLabel>> for Explorer {
                             unreachable!()
                         }
                     } else {
-                        panic!("TODO other constraints")
+                        match &clause.head {
+                            Expr::False => {
+                                let mut samples = Vec::new();
+                                convoluted_terms.reverse();
+                                for e in &clause.body {
+                                    match e {
+                                        Expr::True => (),
+                                        Expr::Apply(p, _, _) => {
+                                            let t = convoluted_terms.pop().unwrap();
+                                            samples.push(Sample(p.clone(), t))
+                                        },
+                                        Expr::False => unreachable!()
+                                    }
+                                }
+
+                                let constraint = Constraint::Negative(samples);
+                                learning_constraints.push(constraint);
+                            },
+                            Expr::Apply(head_p, _, _) => {
+                                // implication constraint.
+                                let head_t = convoluted_terms.pop().unwrap();
+                                let head_sample = Sample(head_p.clone(), head_t);
+
+                                let mut samples = Vec::new();
+                                convoluted_terms.reverse();
+                                for e in &clause.body {
+                                    match e {
+                                        Expr::True => (),
+                                        Expr::Apply(p, _, _) => {
+                                            let t = convoluted_terms.pop().unwrap();
+                                            samples.push(Sample(p.clone(), t))
+                                        },
+                                        Expr::False => unreachable!()
+                                    }
+                                }
+
+                                let constraint = Constraint::Implication(samples, head_sample);
+                                learning_constraints.push(constraint);
+                            },
+                            Expr::True => unreachable!()
+                        }
                     }
                 }
             }

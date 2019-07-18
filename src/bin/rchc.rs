@@ -24,15 +24,15 @@ fn main() {
 
 	let mut solver_cmd = std::process::Command::new("cvc4");
 	solver_cmd.args(&["--incremental", "--finite-model-find", "--produce-model", "--lang=smtlib2.6", "--output-lang=smtlib2.6"]);
-	let solver = smt2::Client::new(
+	let solver = smt2::Client::<_, smt2::client::cvc4::Constant, _, _>::new(
 		solver_cmd,
 		rchc::learner::smt::Sort::Bool,
 		rchc::learner::smt::Function::True,
 		rchc::learner::smt::Function::False
 	).expect("Unable to start the SMT-solver");
 
-	let teacher = rchc::teacher::Explorer::new();
-	let learner = rchc::learner::SMTLearner::<_, _, aligned::Convolution>::new(solver);
+	let teacher = rchc::teacher::Explorer::<aligned::Convolution>::new();
+	let learner = rchc::learner::SMTLearner::<_, _, _, aligned::Convolution>::new(solver);
 	let engine = rchc::Engine::new(learner, teacher);
 	let mut env = rchc::Environment::new(engine);
 
