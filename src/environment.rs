@@ -191,23 +191,41 @@ impl fmt::Debug for Sort {
 pub enum Function {
     Not,
     And,
+    Or,
     Implies,
     Predicate(Rc<Predicate>),
     Constructor(Arc<Sort>, usize),
+    State(Rc<Predicate>, u32)
+}
+
+impl fmt::Display for Function {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        use self::Function::*;
+        match self {
+            Not => write!(f, "not"),
+            And => write!(f, "and"),
+            Or => write!(f, "or"),
+            Implies => write!(f, "=>"),
+            Predicate(p) => write!(f, "{}", p),
+            Constructor(sort, i) => write!(f, "{}.{}", sort, i),
+            State(p, q) => write!(f, "@q_{}_{}", p, q),
+        }
+    }
 }
 
 impl smt2::Function<Environment> for Function {
     fn arity(&self, env: &Environment) -> (usize, usize) {
         match self {
             Function::Not => (1, 1),
-            Function::And => (1, std::usize::MAX),
+            Function::And | Function::Or => (1, std::usize::MAX),
             Function::Implies => (2, 2),
             Function::Predicate(p) => p.arity(env),
             Function::Constructor(sort, n) => {
                 let def = sort.def.read().unwrap();
                 let k = def.as_ref().unwrap().constructors[*n].selectors.len();
                 (k, k)
-            }
+            },
+            Function::State(p, _) => p.arity(env)
         }
     }
 
@@ -222,7 +240,7 @@ impl smt2::Function<Environment> for Function {
                 }
                 Ok(env.sort_bool.clone())
             },
-            Function::And => {
+            Function::And | Function::Or => {
                 for (i, arg) in args.iter().enumerate() {
                     if *arg != env.sort_bool {
                         return Err(Missmatch(i, (&env.sort_bool).into()))
@@ -267,6 +285,9 @@ impl smt2::Function<Environment> for Function {
                     sort: sort.clone(),
                     parameters: parameters
                 })
+            },
+            Function::State(_, _) => {
+                unreachable!()
             }
         }
     }
@@ -351,6 +372,12 @@ pub enum Constant {
     // no constants.
 }
 
+impl fmt::Display for Constant {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "@constant")
+    }
+}
+
 /// Regular CHC solver environement.
 pub struct Environment {
     /// Declared sorts.
@@ -382,6 +409,7 @@ impl Environment {
         let mut functions = HashMap::new();
         functions.insert("not".to_string(), Function::Not);
         functions.insert("and".to_string(), Function::And);
+        functions.insert("or".to_string(), Function::Or);
         functions.insert("=>".to_string(), Function::Implies);
 
         let mut env = Environment {
@@ -657,7 +685,44 @@ impl smt2::Server for Environment {
 
     fn get_model(&mut self) -> Result<smt2::response::Model<Self>> {
         if let Some(model) = self.engine.produce_model() {
-            panic!("TODO Environment::get_model")
+            let mut definitions = Vec::new();
+
+            for (p, instance) in &model {
+                let mut declarations = Vec::new();
+                let mut bodies = Vec::new();
+
+                for q in instance.states() {
+                    let mut args = p.args.iter().enumerate().map(|(i, sort)| {
+                        smt2::SortedVar {
+                            id: format!("BOUND_VARIABLE_{}", i),
+                            sort: sort.clone()
+                        }
+                    }).collect();
+
+                    declarations.push(smt2::response::Declaration {
+                        f: Function::State(p.clone(), *q),
+                        args: args,
+                        return_sort: self.sort_bool.clone()
+                    });
+
+                    bodies.push(smt2::Term::Apply {
+                        fun: Function::Or,
+                        args: Box::new(vec![]),
+                        sort: self.sort_bool.clone()
+                    });
+                }
+
+                definitions.push(smt2::response::Definition {
+                    rec: true,
+                    declarations: declarations,
+                    bodies: bodies
+                });
+            }
+
+            Ok(smt2::response::Model {
+                definitions: definitions
+            })
+            //panic!("TODO Environment::get_model")
         } else {
             Err(Error::NoModel)
         }

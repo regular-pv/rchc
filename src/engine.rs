@@ -1,6 +1,7 @@
 use std::marker::PhantomData;
 use std::fmt;
 use std::collections::HashMap;
+use std::hash::Hash;
 use automatic::Convoluted;
 use ta::Symbol;
 use crate::{Learner, Teacher, Model, rich};
@@ -89,7 +90,7 @@ impl<F: Symbol, P: Clone, I, L, T, M> Engine<F, P, I, L, T, M> where M: Model<P,
     }
 }
 
-impl<F: Symbol, P: Clone, I: ToInstance<F>, L, T, M> Abstract<F, P> for Engine<F, P, I, L, T, M> where M: Model<P, I>, L: Learner<F, P, I, Model=M>, T: Teacher<F, P, I, Model=M>, P: fmt::Display, I: fmt::Display {
+impl<F: Symbol, P: Clone + Eq + Hash, I: ToInstance<F>, L, T, M> Abstract<F, P> for Engine<F, P, I, L, T, M> where M: Model<P, I>, L: Learner<F, P, I, Model=M>, T: Teacher<F, P, I, Model=M>, P: fmt::Display, I: fmt::Display {
     /// Declare a new predicate to solve.
     fn declare_predicate(&mut self, p: P) -> std::result::Result<(), Error> {
         self.predicates.push(p.clone());
@@ -117,11 +118,12 @@ impl<F: Symbol, P: Clone, I: ToInstance<F>, L, T, M> Abstract<F, P> for Engine<F
 
     fn produce_model(&self) -> Option<HashMap<P, Instance<F>>> {
         if let Some(model) = &self.model {
+            let mut map = HashMap::new();
             for p in &self.predicates {
-                let instante = model.get(p).to_instance();
-                //println!("{}: {}", p, model.get(p));
+                map.insert(p.clone(), model.get(p).to_instance());
             }
-            panic!("TODO model");
+
+            Some(map)
         } else {
             None
         }

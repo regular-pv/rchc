@@ -289,11 +289,11 @@ impl<C: Convolution<F>> Teacher<F, P, Relation<F, Q, C>> for Explorer<C> {
 
                     {
                         let terms = C::search(&clause_automata, searchable_patterns).next();
-                        if let Some(terms) = &terms {
-                            println!("found {}", crate::utils::PList(&terms, ","));
-                        } else {
-                            println!("empty");
-                        }
+                        // if let Some(terms) = &terms {
+                        //     println!("found {}", crate::utils::PList(&terms, ","));
+                        // } else {
+                        //     println!("empty");
+                        // }
                         terms
                     }
                     //None
