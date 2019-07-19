@@ -23,6 +23,9 @@ use automatic::{Convoluted, MaybeBottom, convolution::aligned};
 
 use crate::{Error, Result, rich::*, engine, utils::*};
 
+mod match_graph;
+pub use match_graph::*;
+
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum Logic {
     /// HORN logic.
@@ -187,7 +190,7 @@ impl fmt::Debug for Sort {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, PartialEq, Eq)]
 pub enum Function {
     Not,
     And,
@@ -195,7 +198,7 @@ pub enum Function {
     Implies,
     Predicate(Rc<Predicate>),
     Constructor(Arc<Sort>, usize),
-    State(Rc<Predicate>, u32)
+    State(Rc<Predicate>, u32, u32)
 }
 
 impl fmt::Display for Function {
@@ -207,8 +210,19 @@ impl fmt::Display for Function {
             Or => write!(f, "or"),
             Implies => write!(f, "=>"),
             Predicate(p) => write!(f, "{}", p),
-            Constructor(sort, i) => write!(f, "{}.{}", sort, i),
-            State(p, q) => write!(f, "@q_{}_{}", p, q),
+            Constructor(sort, n) => {
+                let guard = sort.def.read().unwrap();
+                if let Some(def) = &*guard {
+                    if let Some(cons) = def.constructors.get(*n) {
+                        write!(f, "{}", cons.id)
+                    } else {
+                        write!(f, "{}.{}!", sort, n)
+                    }
+                } else {
+                    write!(f, "{}.{}", sort, n)
+                }
+            },
+            State(p, q, sig) => write!(f, "@q_{}_{}_{}", p, q, sig),
         }
     }
 }
@@ -225,7 +239,7 @@ impl smt2::Function<Environment> for Function {
                 let k = def.as_ref().unwrap().constructors[*n].selectors.len();
                 (k, k)
             },
-            Function::State(p, _) => p.arity(env)
+            Function::State(p, _, _) => p.arity(env)
         }
     }
 
@@ -286,7 +300,7 @@ impl smt2::Function<Environment> for Function {
                     parameters: parameters
                 })
             },
-            Function::State(_, _) => {
+            _ => {
                 unreachable!()
             }
         }
@@ -400,8 +414,8 @@ impl Environment {
         let sort_bool = Sort::new("Bool", 0, Some(DataTypeDeclaration {
             parameters: Vec::new(),
             constructors: vec![
-                ConstructorDeclaration::simple("True"),
-                ConstructorDeclaration::simple("False")
+                ConstructorDeclaration::simple("true"),
+                ConstructorDeclaration::simple("false")
             ]
         }));
 
@@ -426,6 +440,14 @@ impl Environment {
         env.register_sort(sort_bool);
 
         env
+    }
+
+    pub fn true_fun(&self) -> Function {
+        Function::Constructor(self.sort_bool.sort.clone(), 0)
+    }
+
+    pub fn false_fun(&self) -> Function {
+        Function::Constructor(self.sort_bool.sort.clone(), 1)
     }
 
     /// Register a new sort into the environment.
@@ -691,25 +713,107 @@ impl smt2::Server for Environment {
                 let mut declarations = Vec::new();
                 let mut bodies = Vec::new();
 
+                let mut initial_functions = Vec::new();
+
                 for q in instance.states() {
-                    let mut args = p.args.iter().enumerate().map(|(i, sort)| {
+                    let mut match_graphs: HashMap<_, MatchGraph<Function, &ta::alternating::Clause<u32, Convoluted<u32>>>> = HashMap::new();
+
+                    for (convoluted_f, clauses) in instance.clauses_for_state(q) {
+                        let signature = convoluted_f.signature();
+                        let mut functions = Vec::new();
+                        for f in &convoluted_f.0 {
+                            if let MaybeBottom::Some(f) = f {
+                                functions.push(Function::Constructor(f.sort.sort.clone(), f.n));
+                            }
+                        }
+
+                        match match_graphs.get_mut(&signature) {
+                            Some(match_graph) => {
+                                match_graph.add(&functions, clauses);
+                            },
+                            None => {
+                                let mut match_graph = MatchGraph::new();
+                                match_graph.add(&functions, clauses);
+                                match_graphs.insert(signature, match_graph);
+                            }
+                        }
+                    }
+
+                    for (signature, match_graph) in &match_graphs {
+                        let mut args = Vec::new();
+                        let mut s = *signature;
+                        let mut full_sig = true;
+                        for (i, sort) in p.args.iter().enumerate().rev() {
+                            if s & 1 != 0 {
+                                args.push(smt2::SortedVar {
+                                    id: format!("BOUND_VARIABLE_{}", i),
+                                    sort: sort.clone()
+                                });
+                            } else {
+                                full_sig = false;
+                            }
+
+                            s >>= 1;
+                        }
+                        args.reverse();
+
+                        bodies.push(match_graph.to_term(self, p, &args, p.args.len()));
+
+                        let q_fun = Function::State(p.clone(), *q, *signature);
+
+                        if full_sig && instance.is_initial(q) {
+                            initial_functions.push(q_fun.clone());
+                        }
+
+                        declarations.push(smt2::response::Declaration {
+                            f: q_fun,
+                            args: args,
+                            return_sort: self.sort_bool.clone()
+                        });
+                    }
+                }
+
+                declarations.push(smt2::response::Declaration {
+                    f: Function::Predicate(p.clone()),
+                    args: p.args.iter().enumerate().map(|(i, a)| {
                         smt2::SortedVar {
                             id: format!("BOUND_VARIABLE_{}", i),
-                            sort: sort.clone()
+                            sort: a.clone()
+                        }
+                    }).collect(),
+                    return_sort: self.sort_bool.clone()
+                });
+
+                if initial_functions.len() == 1 {
+                    let args = p.args.iter().enumerate().map(|(i, a)| smt2::Term::Var {
+                        index: i,
+                        id: format!("BOUND_VARIABLE_{}", i).into()
+                    }).collect();
+
+                    bodies.push(smt2::Term::Apply {
+                        fun: initial_functions.into_iter().next().unwrap(),
+                        args: Box::new(args),
+                        sort: self.sort_bool.clone()
+                    })
+                } else {
+                    let initial_apps = initial_functions.into_iter().map(|fun| {
+                        let args = p.args.iter().enumerate().map(|(i, a)| smt2::Term::Var {
+                            index: i,
+                            id: format!("BOUND_VARIABLE_{}", i).into()
+                        }).collect();
+
+                        smt2::Term::Apply {
+                            fun: fun,
+                            args: Box::new(args),
+                            sort: self.sort_bool.clone()
                         }
                     }).collect();
 
-                    declarations.push(smt2::response::Declaration {
-                        f: Function::State(p.clone(), *q),
-                        args: args,
-                        return_sort: self.sort_bool.clone()
-                    });
-
                     bodies.push(smt2::Term::Apply {
                         fun: Function::Or,
-                        args: Box::new(vec![]),
+                        args: Box::new(initial_apps),
                         sort: self.sort_bool.clone()
-                    });
+                    })
                 }
 
                 definitions.push(smt2::response::Definition {
@@ -735,4 +839,14 @@ impl smt2::Server for Environment {
             Logic::HORN => Ok(())
         }
     }
+}
+
+fn bit_count(mut i: u32) -> u8 {
+    let mut c: u8 = 0;
+    while i != 0 {
+        c += (i & 1) as u8;
+        i >>= 1;
+    }
+
+    c
 }
