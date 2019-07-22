@@ -50,6 +50,7 @@ impl<F: Symbol + fmt::Display, Q: State + fmt::Display, C: Convolution<F>> fmt::
 
 impl<F: Symbol, Q: State, C: Convolution<F>> crate::engine::ToInstance<F> for Relation<F, Q, C> {
     fn to_instance(&self) -> crate::engine::Instance<F> {
+        // println!("instance: {}", self.0);
         let alt = C::generic_automaton(&self.0);
 
         let mut map = HashMap::new();
@@ -227,6 +228,9 @@ impl<C: Convolution<F>> Teacher<F, P, Relation<F, Q, C>> for Explorer<C> {
                         let alphabet = domain.alphabet();
 
                         head_automaton = automata[*p_index].clone();
+
+                        // println!("complete automaton\n{} with domain\n{}", head_automaton, domain);
+
                         head_automaton.complete_with(alphabet.iter(), domain);
                         head_automaton.complement();
                     }

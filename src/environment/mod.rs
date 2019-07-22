@@ -425,6 +425,8 @@ impl Environment {
         functions.insert("and".to_string(), Function::And);
         functions.insert("or".to_string(), Function::Or);
         functions.insert("=>".to_string(), Function::Implies);
+        functions.insert("true".to_string(), Function::Constructor(sort_bool.clone(), 0));
+        functions.insert("false".to_string(), Function::Constructor(sort_bool.clone(), 1));
 
         let mut env = Environment {
             sorts: HashMap::new(),

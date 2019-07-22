@@ -56,6 +56,7 @@ pub enum Function<P: Predicate> {
     And,
     Or,
     Implies,
+    Ite,
     Q(ConvolutedSort, u32),
     Predicate(P)
 }
@@ -70,6 +71,7 @@ impl<P: Predicate + fmt::Display> fmt::Display for Function<P> {
             Function::And => write!(f, "and"),
             Function::Or => write!(f, "or"),
             Function::Implies => write!(f, "=>"),
+            Function::Ite => write!(f, "ite"),
             Function::Q(sort, i) => write!(f, "q{}:{}", i, sort),
             Function::Predicate(p) => write!(f, "p{}", p)
         }
@@ -156,6 +158,7 @@ impl<K: Constant + fmt::Display, F: Constructor, P: Predicate, C: Convolution<F>
         solver.predefined_fun("and", Function::And, FunctionSignature::LogicNary);
         solver.predefined_fun("or", Function::Or, FunctionSignature::LogicNary);
         solver.predefined_fun("=>", Function::Implies, FunctionSignature::LogicBinary);
+        solver.predefined_fun("ite", Function::Ite, FunctionSignature::Ite);
         SMTLearner {
             automaton: Vec::new(),
             namespace: Namespace::new(),
@@ -274,6 +277,13 @@ impl<K: Constant + fmt::Display, F: Constructor, P: Predicate, C: Convolution<F>
                 },
                 smt2::Term::Apply { fun: Function::Eq, args, .. } => {
                     Value::Bool(eval(state, &args[0]) == eval(state, &args[1]))
+                },
+                smt2::Term::Apply { fun: Function::Ite, args, .. } => {
+                    if eval(state, &args[0]) == Value::Bool(true) {
+                        eval(state, &args[1])
+                    } else {
+                        eval(state, &args[2])
+                    }
                 },
                 _ => panic!("invalid state definition term! It may also be unsupported.")
             }
