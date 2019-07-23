@@ -91,7 +91,7 @@ impl<F: Clone + PartialEq, T> MatchGraph<F, T> {
 }
 
 impl<'a> Node<Function, &'a ta::alternating::Clause<u32, Convoluted<u32>>> {
-    pub fn to_term(&self, env: &Environment, p: &Rc<Predicate>, function_args: &[smt2::SortedVar<Environment>], mut context_size: usize, variables: &mut Vec<Vec<(usize, Ident)>>) -> smt2::Term<Environment> {
+    pub fn to_term(&self, env: &Environment, p: &Rc<Predicate>, function_args: &[smt2::SortedVar<Environment>], k: usize, mut context_size: usize, variables: &mut Vec<Vec<(usize, Ident)>>) -> smt2::Term<Environment> {
         match self {
             Node::Node { next, .. } => {
                 let mut cases = Vec::with_capacity(next.len());
@@ -104,7 +104,7 @@ impl<'a> Node<Function, &'a ta::alternating::Clause<u32, Convoluted<u32>>> {
                         }).collect();
                         context_size += arity;
 
-                        let pattern = smt2::Pattern {
+                        let pattern = smt2::Pattern::Cons {
                             constructor: f.clone(),
                             args: new_variables.iter().map(|(_, id)| {
                                 id.clone()
@@ -115,12 +115,28 @@ impl<'a> Node<Function, &'a ta::alternating::Clause<u32, Convoluted<u32>>> {
 
                         cases.push(smt2::MatchCase {
                             pattern: pattern,
-                            term: Box::new(n.to_term(env, p, function_args, context_size, variables))
+                            term: Box::new(n.to_term(env, p, function_args, k+1, context_size, variables))
                         });
 
                         variables.pop();
                     } else {
-                        return n.to_term(env, p, function_args, context_size, variables);
+                        return n.to_term(env, p, function_args, k, context_size, variables);
+                    }
+                }
+
+                {
+                    let arg_def = p.args[k].sort.def.read().unwrap();
+                    let len = arg_def.as_ref().unwrap().constructors.len();
+
+                    if cases.len() < len {
+                        cases.push(smt2::MatchCase {
+                            pattern: smt2::Pattern::Var("_".into()),
+                            term: Box::new(smt2::Term::Apply {
+                                fun: env.false_fun(),
+                                args: Box::new(vec![]),
+                                sort: env.sort_bool()
+                            })
+                        });
                     }
                 }
 
@@ -200,7 +216,7 @@ impl<'a> MatchGraph<Function, &'a ta::alternating::Clause<u32, Convoluted<u32>>>
                 }).collect();
                 context_size += arity;
 
-                let pattern = smt2::Pattern {
+                let pattern = smt2::Pattern::Cons {
                     constructor: f.clone(),
                     args: new_variables.iter().map(|(_, id)| {
                         id.clone()
@@ -211,10 +227,26 @@ impl<'a> MatchGraph<Function, &'a ta::alternating::Clause<u32, Convoluted<u32>>>
 
                 cases.push(smt2::MatchCase {
                     pattern: pattern,
-                    term: Box::new(n.to_term(env, p, function_args, context_size, &mut variables))
+                    term: Box::new(n.to_term(env, p, function_args, 1, context_size, &mut variables))
                 });
 
                 variables.pop();
+            }
+        }
+
+        {
+            let arg_def = p.args[0].sort.def.read().unwrap();
+            let len = arg_def.as_ref().unwrap().constructors.len();
+
+            if cases.len() < len {
+                cases.push(smt2::MatchCase {
+                    pattern: smt2::Pattern::Var("_".into()),
+                    term: Box::new(smt2::Term::Apply {
+                        fun: env.false_fun(),
+                        args: Box::new(vec![]),
+                        sort: env.sort_bool()
+                    })
+                });
             }
         }
 
