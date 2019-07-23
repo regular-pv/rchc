@@ -14,7 +14,7 @@ impl Environment {
     pub fn produce_model(&self, model: HashMap<Rc<Predicate>, engine::Instance<TypedConstructor>>) -> Result<smt2::response::Model<Self>> {
         let mut definitions = Vec::new();
 
-        for (p, instance) in &model {
+        for (p, instance) in model.into_iter() {
             let mut declarations = Vec::new();
             let mut bodies = Vec::new();
 
@@ -62,7 +62,7 @@ impl Environment {
                     }
                     args.reverse();
 
-                    bodies.push(match_graph.to_term(self, p, &args, p.args.len()));
+                    bodies.push(match_graph.to_term(self, &p, &args, p.args.len()));
 
                     let q_fun = Function::State(p.clone(), *q, *signature);
 
@@ -124,7 +124,12 @@ impl Environment {
             definitions.push(smt2::response::Definition {
                 rec: true,
                 declarations: declarations,
-                bodies: bodies
+                bodies: bodies,
+                comments: if instance.comments.is_empty() {
+                    String::new()
+                } else {
+                    format!("Predicate `{}` internal representation:\n{}", p, instance.comments)
+                }
             });
         }
 

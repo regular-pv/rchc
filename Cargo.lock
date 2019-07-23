@@ -185,7 +185,7 @@ dependencies = [
  "crossbeam-utils 0.6.5 (registry+https://github.com/rust-lang/crates.io-index)",
  "log 0.4.6 (registry+https://github.com/rust-lang/crates.io-index)",
  "smt2 0.1.0",
- "source-span 1.1.0",
+ "source-span 1.2.0",
  "stderrlog 0.4.1 (registry+https://github.com/rust-lang/crates.io-index)",
  "terms 0.1.0",
  "tree-automata 0.1.0",
@@ -209,13 +209,13 @@ dependencies = [
 name = "smt2"
 version = "0.1.0"
 dependencies = [
- "source-span 1.1.0",
+ "source-span 1.2.0",
  "utf8-decode 1.0.1 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
 
 [[package]]
 name = "source-span"
-version = "1.1.0"
+version = "1.2.0"
 dependencies = [
  "termion 1.5.3 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
