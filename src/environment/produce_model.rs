@@ -21,14 +21,14 @@ impl Environment {
             let mut initial_functions = Vec::new();
 
             for q in instance.automaton.states() {
-                let mut match_graphs: HashMap<_, MatchGraph<Function, &ta::alternating::Clause<u32, Convoluted<u32>>>> = HashMap::new();
+                let mut match_graphs: HashMap<_, MatchGraph<TypedConstructor, &ta::alternating::Clause<u32, Convoluted<u32>>>> = HashMap::new();
 
                 for (convoluted_f, clauses) in instance.automaton.clauses_for_state(q) {
                     let signature = convoluted_f.signature();
                     let mut functions = Vec::new();
                     for f in &convoluted_f.0 {
                         if let MaybeBottom::Some(f) = f {
-                            functions.push(Function::Constructor(f.sort.sort.clone(), f.n));
+                            functions.push(f.clone());
                         }
                     }
 
@@ -90,9 +90,10 @@ impl Environment {
             });
 
             if initial_functions.len() == 1 {
-                let args = p.args.iter().enumerate().map(|(i, _)| smt2::Term::Var {
+                let args = p.args.iter().enumerate().map(|(i, a)| smt2::Term::Var {
                     index: i,
-                    id: format!("BOUND_VARIABLE_{}", i).into()
+                    id: format!("BOUND_VARIABLE_{}", i).into(),
+                    sort: a.clone()
                 }).collect();
 
                 bodies.push(smt2::Term::Apply {
@@ -102,9 +103,10 @@ impl Environment {
                 })
             } else {
                 let initial_apps = initial_functions.into_iter().map(|fun| {
-                    let args = p.args.iter().enumerate().map(|(i, _)| smt2::Term::Var {
+                    let args = p.args.iter().enumerate().map(|(i, a)| smt2::Term::Var {
                         index: i,
-                        id: format!("BOUND_VARIABLE_{}", i).into()
+                        id: format!("BOUND_VARIABLE_{}", i).into(),
+                        sort: a.clone()
                     }).collect();
 
                     smt2::Term::Apply {

@@ -16,7 +16,6 @@ pub mod learner;
 pub mod engine;
 
 pub use error::*;
-pub use clause::*;
 pub use environment::*;
 pub use teacher::Teacher;
 pub use learner::{Learner, Model};

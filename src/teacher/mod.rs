@@ -5,7 +5,7 @@
 
 use std::fmt;
 
-use crate::rich;
+use crate::clause::{self, Clause};
 pub use crate::learner::{Model, Sample, Constraint};
 
 pub mod explorer;
@@ -19,12 +19,12 @@ pub enum Result<F, P> {
 }
 
 /// Teacher trait.
-pub trait Teacher<F: Clone, P: Clone, T> {
+pub trait Teacher<S: Clone + PartialEq, F: Clone, P: Clone, T> {
     type Model: Model<P, T>;
     type Error: fmt::Display;
 
     /// Add a new clause to the solver.
-    fn assert(&mut self, clause: rich::Clause<F, P>) -> std::result::Result<(), Self::Error>;
+    fn assert(&mut self, clause: Clause<S, F, P>) -> std::result::Result<(), Self::Error>;
 
     /// Check a given model.
     /// If it is found to be unsat, gives a non-empty set of learning constraints violated by

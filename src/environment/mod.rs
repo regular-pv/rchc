@@ -20,7 +20,7 @@ use ta::{
 };
 use automatic::{Convoluted, MaybeBottom, convolution::aligned};
 
-use crate::{Error, Result, rich::*, engine};
+use crate::{Error, Result, clause::{self, Clause}, engine};
 
 mod match_graph;
 mod produce_model;
@@ -50,6 +50,12 @@ pub struct TypedConstructor {
 
     // arity of the constructor
     arity: usize
+}
+
+impl TypedConstructor {
+    pub fn parameter(&self, i: usize) -> GroundSort<Arc<Sort>> {
+        panic!("TypedConstructor parameter")
+    }
 }
 
 impl SortedWith<GroundSort<Arc<Sort>>> for TypedConstructor {
@@ -193,6 +199,7 @@ impl fmt::Debug for Sort {
 
 #[derive(Clone, PartialEq, Eq)]
 pub enum Function {
+    Eq,
     Not,
     And,
     Or,
@@ -206,6 +213,7 @@ impl fmt::Display for Function {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         use self::Function::*;
         match self {
+            Eq => write!(f, "="),
             Not => write!(f, "not"),
             And => write!(f, "and"),
             Or => write!(f, "or"),
@@ -231,6 +239,7 @@ impl fmt::Display for Function {
 impl smt2::Function<Environment> for Function {
     fn arity(&self, env: &Environment) -> (usize, usize) {
         match self {
+            Function::Eq => (1, std::usize::MAX),
             Function::Not => (1, 1),
             Function::And | Function::Or => (1, std::usize::MAX),
             Function::Implies => (2, 2),
@@ -247,6 +256,16 @@ impl smt2::Function<Environment> for Function {
     fn typecheck(&self, env: &Environment, args: &[GroundSort<Arc<Sort>>]) -> std::result::Result<GroundSort<Arc<Sort>>, smt2::TypeCheckError<Arc<Sort>>> {
         use smt2::TypeCheckError::*;
         match self {
+            Function::Eq => {
+                for (i, arg) in args.iter().enumerate() {
+                    if i > 0 {
+                        if *arg != args[0] {
+                            return Err(Missmatch(i, (&args[0]).into()))
+                        }
+                    }
+                }
+                Ok(env.sort_bool.clone())
+            },
             Function::Not => {
                 for (i, arg) in args.iter().enumerate() {
                     if *arg != env.sort_bool {
@@ -405,13 +424,13 @@ pub struct Environment {
     functions: HashMap<Ident, Function>,
 
     /// Engine.
-    engine: Box<dyn engine::Abstract<TypedConstructor, Rc<Predicate>>>,
+    engine: Box<dyn engine::Abstract<GroundSort<Arc<Sort>>, TypedConstructor, Rc<Predicate>>>,
 }
 
 impl Environment {
     /// Create a new environment.
     /// At first, only the sort Bool is defined.
-    pub fn new<E: 'static + engine::Abstract<TypedConstructor, Rc<Predicate>>>(engine: E) -> Environment {
+    pub fn new<E: 'static + engine::Abstract<GroundSort<Arc<Sort>>, TypedConstructor, Rc<Predicate>>>(engine: E) -> Environment {
         let sort_bool = Sort::new("Bool", 0, Some(DataTypeDeclaration {
             parameters: Vec::new(),
             constructors: vec![
@@ -422,6 +441,7 @@ impl Environment {
 
         // pre-defined functions.
         let mut functions = HashMap::new();
+        functions.insert("=".to_string(), Function::Eq);
         functions.insert("not".to_string(), Function::Not);
         functions.insert("and".to_string(), Function::And);
         functions.insert("or".to_string(), Function::Or);
@@ -458,11 +478,11 @@ impl Environment {
         self.sorts.insert(sort.id.clone(), sort);
     }
 
-    pub fn register_clause(&mut self, clause: Clause<TypedConstructor, Rc<Predicate>>) -> Result<()> {
+    pub fn register_clause(&mut self, clause: Clause<GroundSort<Arc<Sort>>, TypedConstructor, Rc<Predicate>>) -> Result<()> {
         Ok(self.engine.assert(clause)?)
     }
 
-    pub fn decode_body(&self, term: &Term) -> Result<Vec<Expr<TypedConstructor, Rc<Predicate>>>> {
+    pub fn decode_body(&self, term: &Term) -> Result<Vec<clause::Expr<GroundSort<Arc<Sort>>, TypedConstructor, Rc<Predicate>>>> {
         match term {
             smt2::Term::Apply { fun: Function::And, args, .. } => {
                 let mut conjuncts = Vec::with_capacity(args.len());
@@ -475,17 +495,24 @@ impl Environment {
         }
     }
 
-    pub fn decode_expr(&self, term: &Term) -> Result<Expr<TypedConstructor, Rc<Predicate>>> {
+    pub fn decode_expr(&self, term: &Term) -> Result<clause::Expr<GroundSort<Arc<Sort>>, TypedConstructor, Rc<Predicate>>> {
         match term {
             smt2::Term::Apply { fun: Function::Predicate(p), args, .. } => {
                 let mut patterns = Vec::with_capacity(args.len());
                 for arg in args.iter() {
                     patterns.push(self.decode_pattern(arg)?)
                 }
-                Ok(Expr::Apply(p.clone(), patterns))
+                Ok(clause::Expr::Apply(clause::Predicate::User(p.clone()), patterns))
+            },
+            smt2::Term::Apply { fun: Function::Eq, args, .. } => {
+                let mut patterns = Vec::with_capacity(args.len());
+                for arg in args.iter() {
+                    patterns.push(self.decode_pattern(arg)?)
+                }
+                Ok(clause::Expr::Apply(clause::Predicate::Primitive(clause::Primitive::Eq(args[0].sort(self), args.len())), patterns))
             },
             smt2::Term::Var { index, .. } => {
-                Ok(Expr::Var(*index))
+                Ok(clause::Expr::Var(*index))
             },
             _ => Err(Error::InvalidAssertion)
         }
@@ -609,7 +636,7 @@ impl smt2::Server for Environment {
                     },
                     Apply { fun: Function::Not, args, .. } => {
                         let body = self.decode_body(&args[0])?;
-                        let head = Expr::False;
+                        let head = clause::Expr::False;
                         self.register_clause(Clause::new(body, head))?;
                         Ok(())
                     },
@@ -620,7 +647,7 @@ impl smt2::Server for Environment {
                 match args[0].borrow() {
                     Exists { body, .. } => {
                         let body = self.decode_body(&body)?;
-                        self.register_clause(Clause::new(body, Expr::False))?;
+                        self.register_clause(Clause::new(body, clause::Expr::False))?;
                         Ok(())
                     },
                     _ => Err(Error::InvalidAssertion)

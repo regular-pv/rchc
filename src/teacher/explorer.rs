@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::rc::Rc;
+use std::sync::Arc;
 use std::fmt;
 use std::cell::Cell;
 use std::marker::PhantomData;
@@ -19,9 +20,10 @@ use automatic::{
     Convolution,
     MaybeBottom
 };
+use smt2::GroundSort;
 use crate::{
-    rich,
-    environment::{TypedConstructor, Predicate, ConvolutedSort}
+    clause,
+    environment::{TypedConstructor, Sort, ConvolutedSort}
 };
 use super::{Teacher, Constraint, Sample, Result};
 
@@ -36,7 +38,7 @@ impl fmt::Display for Error {
 }
 
 type F = TypedConstructor;
-type P = Rc<Predicate>;
+type P = Rc<crate::environment::Predicate>;
 
 pub struct Relation<F: Symbol, Q: State, C: Convolution<F>>(pub Automaton<Rank<Convoluted<F>>, Q, NoLabel>, pub PhantomData<C>);
 
@@ -62,6 +64,12 @@ impl<F: Symbol, Q: State, C: Convolution<F>> crate::engine::ToInstance<F> for Re
     }
 }
 
+pub struct PrimitiveData {
+    primitive: clause::Primitive<GroundSort<Arc<Sort>>>,
+    automaton: Automaton<Rank<Convoluted<F>>, Q, NoLabel>,
+    complement: Option<Automaton<Rank<Convoluted<F>>, Q, NoLabel>>
+}
+
 /// A simple teacher that explores automata runs to check guesses.
 pub struct Explorer<C: Convolution<F>> {
     /// Known predicate, and their assigned index.
@@ -70,13 +78,21 @@ pub struct Explorer<C: Convolution<F>> {
     /// Known CHC clauses.
     clauses: Vec<Clause>,
 
+    /// Computed primitives.
+    primitives: Vec<PrimitiveData>,
+
     c: PhantomData<C>
 }
 
 pub enum Expr {
     True,
     False,
-    Apply(P, usize, Convoluted<Pattern<F, usize>>)
+    Apply(Predicate, Convoluted<Pattern<F, usize>>)
+}
+
+pub enum Predicate {
+    Primitive(usize),
+    User(P, usize)
 }
 
 pub struct Clause {
@@ -89,6 +105,7 @@ impl<C: Convolution<F>> Explorer<C> {
         Explorer {
             predicates: HashMap::new(),
             clauses: Vec::new(),
+            primitives: Vec::new(),
             c: PhantomData
         }
     }
@@ -102,14 +119,14 @@ impl<C: Convolution<F>> Explorer<C> {
         }
     }
 
-    fn compile_clause_expr(&mut self, e: rich::Expr<F, P>) -> Expr {
+    fn compile_clause_expr(&mut self, e: clause::Expr<GroundSort<Arc<Sort>>, F, P>) -> Expr {
         match e {
-            rich::Expr::True => Expr::True,
-            rich::Expr::False => Expr::False,
-            rich::Expr::Var(_) => {
+            clause::Expr::True => Expr::True,
+            clause::Expr::False => Expr::False,
+            clause::Expr::Var(_) => {
                 panic!("TODO variable")
             },
-            rich::Expr::Apply(p, patterns) => {
+            clause::Expr::Apply(clause::Predicate::User(p), patterns) => {
                 let index = if let Some(index) = self.index_of(&p) {
                     index
                 } else {
@@ -120,9 +137,37 @@ impl<C: Convolution<F>> Explorer<C> {
 
                 let patterns = patterns.into_iter().map(|p| MaybeBottom::Some(p)).collect();
                 let convoluted_pattern = Convoluted(patterns);
-                Expr::Apply(p.clone(), index, convoluted_pattern)
+                Expr::Apply(Predicate::User(p, index), convoluted_pattern)
+            },
+            clause::Expr::Apply(clause::Predicate::Primitive(primitive), patterns) => {
+                let patterns = patterns.into_iter().map(|p| MaybeBottom::Some(p)).collect();
+                let convoluted_pattern = Convoluted(patterns);
+                Expr::Apply(Predicate::Primitive(self.get_primitve_index(primitive)), convoluted_pattern)
             }
         }
+    }
+
+    pub fn get_primitve_index(&mut self, p: clause::Primitive<GroundSort<Arc<Sort>>>) -> usize {
+        for (i, known) in self.primitives.iter().enumerate() {
+            if known.primitive == p {
+                return i
+            }
+        }
+
+        let i = self.primitives.len();
+        let data = PrimitiveData {
+            primitive: p.clone(),
+            automaton: match p {
+                clause::Primitive::Eq(sort, n) => {
+                    let domain = sort.automaton();
+                    C::equality(domain, n)
+                }
+            },
+            complement: None
+        };
+
+        self.primitives.push(data);
+        i
     }
 
     /// For a given pattern p, let's name \omega the ordered list of variables
@@ -168,12 +213,12 @@ impl fmt::Display for Q {
     }
 }
 
-impl<C: Convolution<F>> Teacher<F, P, Relation<F, Q, C>> for Explorer<C> {
+impl<C: Convolution<F>> Teacher<GroundSort<Arc<Sort>>, F, P, Relation<F, Q, C>> for Explorer<C> {
     type Model = HashMap<P, Relation<F, Q, C>>;
     type Error = Error;
 
     /// Add a new clause to the solver.
-    fn assert(&mut self, clause: rich::Clause<F, P>) -> std::result::Result<(), Error> {
+    fn assert(&mut self, clause: crate::clause::Clause<GroundSort<Arc<Sort>>, F, P>) -> std::result::Result<(), Error> {
         let mut body = Vec::with_capacity(clause.body.len());
         for e in clause.body {
             body.push(self.compile_clause_expr(e));
@@ -223,7 +268,7 @@ impl<C: Convolution<F>> Teacher<F, P, Relation<F, Q, C>> for Explorer<C> {
                     Expr::False => {
                         head_automaton = Automaton::new();
                     },
-                    Expr::Apply(p, p_index, _) => {
+                    Expr::Apply(Predicate::User(p, p_index), _) => {
                         let domain = p.domain();
                         let alphabet = domain.alphabet();
 
@@ -233,6 +278,9 @@ impl<C: Convolution<F>> Teacher<F, P, Relation<F, Q, C>> for Explorer<C> {
 
                         head_automaton.complete_with(alphabet.iter(), domain);
                         head_automaton.complement();
+                    },
+                    Expr::Apply(Predicate::Primitive(p), _) => {
+                        panic!("TODO eq automaton")
                     }
                 }
 
@@ -247,8 +295,12 @@ impl<C: Convolution<F>> Teacher<F, P, Relation<F, Q, C>> for Explorer<C> {
                     match e {
                         Expr::True => panic!("todo Expr::True"),
                         Expr::False => panic!("todo Expr::False"),
-                        Expr::Apply(_, p_index, pattern) => {
+                        Expr::Apply(Predicate::User(_, p_index), pattern) => {
                             clause_automata.push(automata[*p_index]);
+                            patterns.push(pattern.clone());
+                        },
+                        Expr::Apply(Predicate::Primitive(p), pattern) => {
+                            panic!("Eq automaton");
                             patterns.push(pattern.clone());
                         }
                     }
@@ -257,7 +309,7 @@ impl<C: Convolution<F>> Teacher<F, P, Relation<F, Q, C>> for Explorer<C> {
                 match &clause.head {
                     Expr::True => panic!("todo Expr::True"),
                     Expr::False => (),
-                    Expr::Apply(_, _, pattern) => {
+                    Expr::Apply(_, pattern) => {
                         clause_automata.push(&head_automata[k]);
                         patterns.push(pattern.clone());
                     }
@@ -313,33 +365,20 @@ impl<C: Convolution<F>> Teacher<F, P, Relation<F, Q, C>> for Explorer<C> {
 
                     if clause.body.is_empty() {
                         // positive example.
-                        if let Expr::Apply(p, _, _) = &clause.head {
-                            let sample = convoluted_terms.pop().unwrap();
-                            let constraint = Constraint::Positive(Sample(p.clone(), sample));
-                            learning_constraints.push(constraint);
-                        } else {
-                            unreachable!()
+                        match &clause.head {
+                            Expr::Apply(Predicate::User(p, _), _) => {
+                                let sample = convoluted_terms.pop().unwrap();
+                                let constraint = Constraint::Positive(Sample(p.clone(), sample));
+                                learning_constraints.push(constraint);
+                            },
+                            Expr::Apply(_, _) => {
+                                panic!("found a positive example for a primitive!")
+                            },
+                            _ => unreachable!()
                         }
                     } else {
                         match &clause.head {
-                            Expr::False => {
-                                let mut samples = Vec::new();
-                                convoluted_terms.reverse();
-                                for e in &clause.body {
-                                    match e {
-                                        Expr::True => (),
-                                        Expr::Apply(p, _, _) => {
-                                            let t = convoluted_terms.pop().unwrap();
-                                            samples.push(Sample(p.clone(), t))
-                                        },
-                                        Expr::False => unreachable!()
-                                    }
-                                }
-
-                                let constraint = Constraint::Negative(samples);
-                                learning_constraints.push(constraint);
-                            },
-                            Expr::Apply(head_p, _, _) => {
+                            Expr::Apply(Predicate::User(head_p, _), _) => {
                                 // implication constraint.
                                 let head_t = convoluted_terms.pop().unwrap();
                                 let head_sample = Sample(head_p.clone(), head_t);
@@ -349,15 +388,40 @@ impl<C: Convolution<F>> Teacher<F, P, Relation<F, Q, C>> for Explorer<C> {
                                 for e in &clause.body {
                                     match e {
                                         Expr::True => (),
-                                        Expr::Apply(p, _, _) => {
+                                        Expr::Apply(Predicate::User(p, _), _) => {
                                             let t = convoluted_terms.pop().unwrap();
                                             samples.push(Sample(p.clone(), t))
+                                        },
+                                        Expr::Apply(_, _) => {
+                                            convoluted_terms.pop().unwrap();
+                                            // ignore what we already know.
                                         },
                                         Expr::False => unreachable!()
                                     }
                                 }
 
                                 let constraint = Constraint::Implication(samples, head_sample);
+                                learning_constraints.push(constraint);
+                            },
+                            Expr::False | Expr::Apply(_, _) => {
+                                let mut samples = Vec::new();
+                                convoluted_terms.reverse();
+                                for e in &clause.body {
+                                    match e {
+                                        Expr::True => (),
+                                        Expr::Apply(Predicate::User(p, _), _) => {
+                                            let t = convoluted_terms.pop().unwrap();
+                                            samples.push(Sample(p.clone(), t))
+                                        },
+                                        Expr::Apply(_, _) => {
+                                            convoluted_terms.pop().unwrap();
+                                            // ignore what we already know.
+                                        },
+                                        Expr::False => unreachable!()
+                                    }
+                                }
+
+                                let constraint = Constraint::Negative(samples);
                                 learning_constraints.push(constraint);
                             },
                             Expr::True => unreachable!()

@@ -1,8 +1,11 @@
 use std::rc::Rc;
+use std::sync::Arc;
 use smt2::Function as SMT2Function;
 use smt2::Environment as SMT2Environment;
+use smt2::GroundSort;
+use ta::Ranked;
 use automatic::MaybeBottom;
-use super::{Environment, Predicate, Function, Ident, Convoluted};
+use super::{Environment, Predicate, Sort, TypedConstructor, Function, Ident, Convoluted};
 
 enum Node<F: Clone + PartialEq, T> {
     Leaf(T),
@@ -90,23 +93,24 @@ impl<F: Clone + PartialEq, T> MatchGraph<F, T> {
     }
 }
 
-impl<'a> Node<Function, &'a ta::alternating::Clause<u32, Convoluted<u32>>> {
-    pub fn to_term(&self, env: &Environment, p: &Rc<Predicate>, function_args: &[smt2::SortedVar<Environment>], k: usize, mut context_size: usize, variables: &mut Vec<Vec<(usize, Ident)>>) -> smt2::Term<Environment> {
+impl<'a> Node<TypedConstructor, &'a ta::alternating::Clause<u32, Convoluted<u32>>> {
+    pub fn to_term(&self, env: &Environment, p: &Rc<Predicate>, function_args: &[smt2::SortedVar<Environment>], k: usize, mut context_size: usize, variables: &mut Vec<Vec<(usize, GroundSort<Arc<Sort>>, Ident)>>) -> smt2::Term<Environment> {
         match self {
             Node::Node { next, .. } => {
                 let mut cases = Vec::with_capacity(next.len());
                 for n in next.iter() {
                     if let Node::Node { f, .. } = n {
-                        let (arity, _) = f.arity(env);
-                        let new_variables: Vec<(usize, Ident)> = (0..arity).map(|i| {
+                        let arity = f.arity();
+                        let new_variables: Vec<(usize, GroundSort<Arc<Sort>>, Ident)> = (0..arity).map(|i| {
                             let index = context_size+i;
-                            (index, format!("BOUND_VARIABLE_{}", index).into())
+                            let sort = f.parameter(i);
+                            (index, sort, format!("BOUND_VARIABLE_{}", index).into())
                         }).collect();
                         context_size += arity;
 
                         let pattern = smt2::Pattern::Cons {
-                            constructor: f.clone(),
-                            args: new_variables.iter().map(|(_, id)| {
+                            constructor: Function::Constructor(f.sort.sort.clone(), f.n),
+                            args: new_variables.iter().map(|(_, _, id)| {
                                 id.clone()
                             }).collect()
                         };
@@ -141,7 +145,7 @@ impl<'a> Node<Function, &'a ta::alternating::Clause<u32, Convoluted<u32>>> {
                 }
 
                 smt2::Term::Match {
-                    term: Box::new(smt2::Term::Var { index: 0, id: function_args[0].id.clone() }),
+                    term: Box::new(smt2::Term::Var { index: k, id: function_args[k].id.clone(), sort: function_args[k].sort.clone() }),
                     cases: cases
                 }
             },
@@ -154,10 +158,11 @@ impl<'a> Node<Function, &'a ta::alternating::Clause<u32, Convoluted<u32>>> {
                         let mut k = 0;
                         for i in indexes.iter() {
                             if let MaybeBottom::Some(i) = i {
-                                let (index, id) = variables[k][*i as usize].clone();
+                                let (index, sort, id) = variables[k][*i as usize].clone();
                                 args.push(smt2::Term::Var {
                                     index: index,
-                                    id: id
+                                    id: id,
+                                    sort: sort
                                 });
                                 k += 1;
                             }
@@ -203,22 +208,23 @@ impl<'a> Node<Function, &'a ta::alternating::Clause<u32, Convoluted<u32>>> {
     }
 }
 
-impl<'a> MatchGraph<Function, &'a ta::alternating::Clause<u32, Convoluted<u32>>> {
+impl<'a> MatchGraph<TypedConstructor, &'a ta::alternating::Clause<u32, Convoluted<u32>>> {
     pub fn to_term(&self, env: &Environment, p: &Rc<Predicate>, function_args: &[smt2::SortedVar<Environment>], mut context_size: usize) -> smt2::Term<Environment> {
-        let mut variables: Vec<Vec<(usize, Ident)>> = Vec::new();
+        let mut variables: Vec<Vec<(usize, GroundSort<Arc<Sort>>, Ident)>> = Vec::new();
         let mut cases = Vec::with_capacity(self.roots.len());
         for n in &self.roots {
             if let Node::Node { f, .. } = n {
-                let (arity, _) = f.arity(env);
-                let new_variables: Vec<(usize, Ident)> = (0..arity).map(|i| {
+                let arity = f.arity();
+                let new_variables: Vec<(usize, GroundSort<Arc<Sort>>, Ident)> = (0..arity).map(|i| {
                     let index = context_size+i;
-                    (index, format!("BOUND_VARIABLE_{}", index).into())
+                    let sort = f.parameter(i);
+                    (index, sort, format!("BOUND_VARIABLE_{}", index).into())
                 }).collect();
                 context_size += arity;
 
                 let pattern = smt2::Pattern::Cons {
-                    constructor: f.clone(),
-                    args: new_variables.iter().map(|(_, id)| {
+                    constructor: Function::Constructor(f.sort.sort.clone(), f.n),
+                    args: new_variables.iter().map(|(_, _, id)| {
                         id.clone()
                     }).collect()
                 };
@@ -251,7 +257,7 @@ impl<'a> MatchGraph<Function, &'a ta::alternating::Clause<u32, Convoluted<u32>>>
         }
 
         smt2::Term::Match {
-            term: Box::new(smt2::Term::Var { index: 0, id: function_args[0].id.clone() }),
+            term: Box::new(smt2::Term::Var { index: 0, id: function_args[0].id.clone(), sort: function_args[0].sort.clone() }),
             cases: cases
         }
     }

@@ -4,7 +4,7 @@ use std::collections::HashMap;
 use std::hash::Hash;
 use automatic::Convoluted;
 use ta::Symbol;
-use crate::{Learner, Teacher, Model, rich};
+use crate::{Learner, Teacher, Model, clause::Clause};
 use crate::learner::Constraint;
 pub use crate::teacher::Result;
 
@@ -32,12 +32,12 @@ pub trait ToInstance<F: Symbol> {
     fn to_instance(&self) -> Instance<F>;
 }
 
-pub trait Abstract<F: Symbol, P: Clone> {
+pub trait Abstract<S: Clone + PartialEq, F: Symbol, P: Clone> {
     /// Declare a new predicate to solve.
     fn declare_predicate(&mut self, p: P) -> std::result::Result<(), Error>;
 
     /// Add a new clause to the solver.
-    fn assert(&mut self, clause: rich::Clause<F, P>) -> std::result::Result<(), Error>;
+    fn assert(&mut self, clause: Clause<S, F, P>) -> std::result::Result<(), Error>;
 
     /// Find the next model and check it.
     fn check(&mut self) -> std::result::Result<Option<Result<F, P>>, Error>;
@@ -49,23 +49,25 @@ pub trait Abstract<F: Symbol, P: Clone> {
     fn produce_model(&self) -> Option<HashMap<P, Instance<F>>>;
 }
 
-pub struct Engine<F: Symbol, P: Clone, I, L, T, M> where M: Model<P, I>, L: Learner<F, P, I, Model=M>, T: Teacher<F, P, I, Model=M> {
+pub struct Engine<S: Clone + PartialEq, F: Symbol, P: Clone, I, L, T, M> where M: Model<P, I>, L: Learner<F, P, I, Model=M>, T: Teacher<S, F, P, I, Model=M> {
     learner: L,
     teacher: T,
     predicates: Vec<P>,
     model: Option<L::Model>,
+    _s: PhantomData<S>,
     _f: PhantomData<F>,
     _i: PhantomData<I>,
     _m: PhantomData<M>
 }
 
-impl<F: Symbol, P: Clone, I, L, T, M> Engine<F, P, I, L, T, M> where M: Model<P, I>, L: Learner<F, P, I, Model=M>, T: Teacher<F, P, I, Model=M> {
-    pub fn new(learner: L, teacher: T) -> Engine<F, P, I, L, T, M> {
+impl<S: Clone + PartialEq, F: Symbol, P: Clone, I, L, T, M> Engine<S, F, P, I, L, T, M> where M: Model<P, I>, L: Learner<F, P, I, Model=M>, T: Teacher<S, F, P, I, Model=M> {
+    pub fn new(learner: L, teacher: T) -> Engine<S, F, P, I, L, T, M> {
         Engine {
             learner: learner,
             teacher: teacher,
             predicates: Vec::new(),
             model: None,
+            _s: PhantomData,
             _f: PhantomData,
             _i: PhantomData,
             _m: PhantomData
@@ -93,7 +95,7 @@ impl<F: Symbol, P: Clone, I, L, T, M> Engine<F, P, I, L, T, M> where M: Model<P,
     }
 }
 
-impl<F: Symbol, P: Clone + Eq + Hash + fmt::Display, I: ToInstance<F>, L, T, M> Abstract<F, P> for Engine<F, P, I, L, T, M> where M: Model<P, I>, L: Learner<F, P, I, Model=M>, T: Teacher<F, P, I, Model=M>, P: fmt::Display, I: fmt::Display {
+impl<S: Clone + PartialEq, F: Symbol, P: Clone + Eq + Hash + fmt::Display, I: ToInstance<F>, L, T, M> Abstract<S, F, P> for Engine<S, F, P, I, L, T, M> where M: Model<P, I>, L: Learner<F, P, I, Model=M>, T: Teacher<S, F, P, I, Model=M>, P: fmt::Display, I: fmt::Display {
     /// Declare a new predicate to solve.
     fn declare_predicate(&mut self, p: P) -> std::result::Result<(), Error> {
         debug!("engine: declare new predicate `{}`", p);
@@ -102,7 +104,7 @@ impl<F: Symbol, P: Clone + Eq + Hash + fmt::Display, I: ToInstance<F>, L, T, M> 
     }
 
     /// Add a new clause to the solver.
-    fn assert(&mut self, clause: rich::Clause<F, P>) -> std::result::Result<(), Error> {
+    fn assert(&mut self, clause: Clause<S, F, P>) -> std::result::Result<(), Error> {
         Self::teacher_result(self.teacher.assert(clause))
     }
 
