@@ -13,7 +13,6 @@ use ta::{
         Automaton,
         Configuration
     },
-    combinations,
     NoLabel,
     Ranked,
     Rank,
@@ -21,9 +20,11 @@ use ta::{
 };
 use automatic::{Convoluted, MaybeBottom, convolution::aligned};
 
-use crate::{Error, Result, rich::*, engine, utils::*};
+use crate::{Error, Result, rich::*, engine};
 
 mod match_graph;
+mod produce_model;
+
 pub use match_graph::*;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -143,22 +144,22 @@ impl Iterator for GroundSortConfigurations {
 }
 
 impl ta::bottom_up::LanguageState<TypedConstructor, ()> for GroundSort<Arc<Sort>> {
-    fn configurations<'a>(&self, env: &'a ()) -> Box<dyn Iterator<Item = Configuration<TypedConstructor, Self>> + 'a> {
+    fn configurations<'a>(&self, _env: &'a ()) -> Box<dyn Iterator<Item = Configuration<TypedConstructor, Self>> + 'a> {
         Box::new(GroundSortConfigurations::new(self))
     }
 }
 
 pub struct Sort {
     id: Ident,
-    arity: usize,
+    //arity: usize,
     def: RwLock<Option<DataTypeDeclaration>>
 }
 
 impl Sort {
-    pub fn new<Id: Into<Ident>>(id: Id, arity: usize, def: Option<DataTypeDeclaration>) -> Arc<Sort> {
+    pub fn new<Id: Into<Ident>>(id: Id, _arity: usize, def: Option<DataTypeDeclaration>) -> Arc<Sort> {
         Arc::new(Sort {
             id: id.into(),
-            arity: arity,
+            //arity: arity,
             def: RwLock::new(def)
         })
     }
@@ -537,19 +538,19 @@ impl smt2::Environment for Environment {
         self.sort_bool.clone()
     }
 
-    fn const_sort(&self, cst: &Constant) -> GroundSort<Arc<Sort>> {
+    fn const_sort(&self, _cst: &Constant) -> GroundSort<Arc<Sort>> {
         panic!("TODO const_sort")
     }
 }
 
 impl smt2::Compiler for Environment {
     /// Find the ident for the iven syntax symbol.
-    fn ident_of_symbol<F: Clone>(&self, sym: &smt2::syntax::Symbol<F>) -> Option<Ident> {
+    fn ident_of_symbol(&self, sym: &smt2::syntax::Symbol) -> Option<Ident> {
         Some(sym.id.clone())
     }
 
     /// Find the ident for the given syntax ident.
-    fn ident<F: Clone>(&self, id: &smt2::syntax::Ident<F>) -> Option<Ident> {
+    fn ident(&self, id: &smt2::syntax::Ident) -> Option<Ident> {
         if id.indexes.is_empty() {
             self.ident_of_symbol(&id.id)
         } else {
@@ -661,7 +662,7 @@ impl smt2::Server for Environment {
     fn declare_sort(&mut self, decl: &smt2::SortDeclaration<Self>) -> Result<()> {
         self.register_sort(Arc::new(Sort {
             id: decl.id.clone(),
-            arity: decl.arity,
+            //arity: decl.arity,
             def: RwLock::new(None) // undefined.
         }));
 
@@ -709,126 +710,7 @@ impl smt2::Server for Environment {
 
     fn get_model(&mut self) -> Result<smt2::response::Model<Self>> {
         if let Some(model) = self.engine.produce_model() {
-            let mut definitions = Vec::new();
-
-            for (p, instance) in &model {
-                let mut declarations = Vec::new();
-                let mut bodies = Vec::new();
-
-                let mut initial_functions = Vec::new();
-
-                for q in instance.states() {
-                    let mut match_graphs: HashMap<_, MatchGraph<Function, &ta::alternating::Clause<u32, Convoluted<u32>>>> = HashMap::new();
-
-                    for (convoluted_f, clauses) in instance.clauses_for_state(q) {
-                        let signature = convoluted_f.signature();
-                        let mut functions = Vec::new();
-                        for f in &convoluted_f.0 {
-                            if let MaybeBottom::Some(f) = f {
-                                functions.push(Function::Constructor(f.sort.sort.clone(), f.n));
-                            }
-                        }
-
-                        match match_graphs.get_mut(&signature) {
-                            Some(match_graph) => {
-                                match_graph.add(&functions, clauses);
-                            },
-                            None => {
-                                let mut match_graph = MatchGraph::new();
-                                match_graph.add(&functions, clauses);
-                                match_graphs.insert(signature, match_graph);
-                            }
-                        }
-                    }
-
-                    for (signature, match_graph) in &match_graphs {
-                        let mut args = Vec::new();
-                        let mut s = *signature;
-                        let mut full_sig = true;
-                        for (i, sort) in p.args.iter().enumerate().rev() {
-                            if s & 1 != 0 {
-                                args.push(smt2::SortedVar {
-                                    id: format!("BOUND_VARIABLE_{}", i),
-                                    sort: sort.clone()
-                                });
-                            } else {
-                                full_sig = false;
-                            }
-
-                            s >>= 1;
-                        }
-                        args.reverse();
-
-                        bodies.push(match_graph.to_term(self, p, &args, p.args.len()));
-
-                        let q_fun = Function::State(p.clone(), *q, *signature);
-
-                        if full_sig && instance.is_initial(q) {
-                            initial_functions.push(q_fun.clone());
-                        }
-
-                        declarations.push(smt2::response::Declaration {
-                            f: q_fun,
-                            args: args,
-                            return_sort: self.sort_bool.clone()
-                        });
-                    }
-                }
-
-                declarations.push(smt2::response::Declaration {
-                    f: Function::Predicate(p.clone()),
-                    args: p.args.iter().enumerate().map(|(i, a)| {
-                        smt2::SortedVar {
-                            id: format!("BOUND_VARIABLE_{}", i),
-                            sort: a.clone()
-                        }
-                    }).collect(),
-                    return_sort: self.sort_bool.clone()
-                });
-
-                if initial_functions.len() == 1 {
-                    let args = p.args.iter().enumerate().map(|(i, a)| smt2::Term::Var {
-                        index: i,
-                        id: format!("BOUND_VARIABLE_{}", i).into()
-                    }).collect();
-
-                    bodies.push(smt2::Term::Apply {
-                        fun: initial_functions.into_iter().next().unwrap(),
-                        args: Box::new(args),
-                        sort: self.sort_bool.clone()
-                    })
-                } else {
-                    let initial_apps = initial_functions.into_iter().map(|fun| {
-                        let args = p.args.iter().enumerate().map(|(i, a)| smt2::Term::Var {
-                            index: i,
-                            id: format!("BOUND_VARIABLE_{}", i).into()
-                        }).collect();
-
-                        smt2::Term::Apply {
-                            fun: fun,
-                            args: Box::new(args),
-                            sort: self.sort_bool.clone()
-                        }
-                    }).collect();
-
-                    bodies.push(smt2::Term::Apply {
-                        fun: Function::Or,
-                        args: Box::new(initial_apps),
-                        sort: self.sort_bool.clone()
-                    })
-                }
-
-                definitions.push(smt2::response::Definition {
-                    rec: true,
-                    declarations: declarations,
-                    bodies: bodies
-                });
-            }
-
-            Ok(smt2::response::Model {
-                definitions: definitions
-            })
-            //panic!("TODO Environment::get_model")
+            self.produce_model(model)
         } else {
             Err(Error::NoModel)
         }
@@ -841,14 +723,4 @@ impl smt2::Server for Environment {
             Logic::HORN => Ok(())
         }
     }
-}
-
-fn bit_count(mut i: u32) -> u8 {
-    let mut c: u8 = 0;
-    while i != 0 {
-        c += (i & 1) as u8;
-        i >>= 1;
-    }
-
-    c
 }

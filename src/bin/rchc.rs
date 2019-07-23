@@ -3,13 +3,20 @@ extern crate log;
 extern crate stderrlog;
 #[macro_use]
 extern crate clap;
-
+extern crate utf8_decode;
+extern crate source_span;
 extern crate smt2;
 extern crate rchc;
 extern crate automatic_relations as automatic;
 
 use std::io::Read;
-use smt2::syntax::{Localisable, Buffer};
+use std::rc::Rc;
+use utf8_decode::UnsafeDecoder;
+use source_span::{
+	Position,
+	lazy::Buffer,
+	fmt::*
+};
 use smt2::syntax::Parsable;
 use automatic::convolution::aligned;
 
@@ -22,17 +29,18 @@ fn main() {
 	let verbosity = matches.occurrences_of("verbose") as usize;
     stderrlog::new().verbosity(verbosity).init().unwrap();
 
-	let mut solver_cmd = std::process::Command::new("cvc4");
-	solver_cmd.args(&["--incremental", "--finite-model-find", "--produce-model", "--lang=smtlib2.6", "--output-lang=smtlib2.6"]);
-	let solver = smt2::Client::<_, smt2::client::cvc4::Constant, _, _>::new(
-		solver_cmd,
-		rchc::learner::smt::Sort::Bool,
-		rchc::learner::smt::Function::True,
-		rchc::learner::smt::Function::False
-	).expect("Unable to start the SMT-solver");
+	let solver = load_smt_solver();
 
 	let teacher = rchc::teacher::Explorer::<aligned::Convolution>::new();
-	let learner = rchc::learner::SMTLearner::<_, _, _, aligned::Convolution>::new(solver);
+
+	let learner = match rchc::learner::SMTLearner::<_, _, _, aligned::Convolution>::new(solver) {
+		Ok(learner) => learner,
+		Err(e) => {
+			error!("Unable to load the learner: {}", e);
+			std::process::exit(1)
+		}
+	};
+
 	let engine = rchc::Engine::new(learner, teacher);
 	let mut env = rchc::Environment::new(engine);
 
@@ -56,12 +64,29 @@ fn main() {
     }
 }
 
+fn load_smt_solver() -> smt2::Client<&'static str, smt2::client::cvc4::Constant, rchc::learner::smt::Sort, rchc::learner::smt::Function<Rc<rchc::Predicate>>> {
+	let mut solver_cmd = std::process::Command::new("cvc4");
+	solver_cmd.args(&["--incremental", "--finite-model-find", "--produce-model", "--lang=smtlib2.6", "--output-lang=smtlib2.6"]);
+	match smt2::Client::<_, smt2::client::cvc4::Constant, _, _>::new(
+		solver_cmd,
+		rchc::learner::smt::Sort::Bool,
+		rchc::learner::smt::Function::True,
+		rchc::learner::smt::Function::False
+	) {
+		Ok(solver) => solver,
+		Err(e) => {
+			error!("Unable to load SMT-solver: {}", e);
+			std::process::exit(1)
+		}
+	}
+}
+
 /// Process a given SMT2-lib input.
 fn process_input<Input: Read, F: std::fmt::Display + Clone>(env: &mut rchc::Environment, input: Input, file: F) {
-	let start = smt2::syntax::Cursor::default();
-	let decoder = smt2::lexer::Decoder::new(input.bytes());
+	let start = Position::default();
+	let decoder = UnsafeDecoder::new(input.bytes());
 	let buffer = Buffer::new(decoder, start);
-	let mut lexer = smt2::Lexer::new(buffer.reader(), file.clone(), start).peekable();
+	let mut lexer = smt2::Lexer::new(buffer.iter(), start).peekable();
 
 	// read command until end of file.
 	while let Some(_) = lexer.peek() {
@@ -73,28 +98,39 @@ fn process_input<Input: Read, F: std::fmt::Display + Clone>(env: &mut rchc::Envi
 							Ok(()) => (),
 							Err(e) => {
 								println!("\x1b[1;31mruntime error\x1b[m\x1b[1;1m: {}\x1b[m", e);
-								println!("\x1b[1;34m  -->\x1b[m {}", phrase.location());
-								let mut pp = smt2::syntax::PrettyPrinter::new(&buffer, phrase.location());
-								pp.add_hint(phrase.location());
-								println!("{}", pp);
+								println!("\x1b[1;34m  -->\x1b[m {} {}", file, phrase.span());
+								let mut pp = Formatter::new();
+								pp.add(phrase.span(), None, Style::Error);
+
+								let viewport = phrase.span().aligned();
+								println!("{}", pp.get(buffer.iter_from(viewport.start()), viewport).unwrap());
+
+								std::process::exit(1)
 							}
 						}
 					},
 					Err(e) => {
 						println!("\x1b[1;31merror\x1b[m\x1b[1;1m: {}\x1b[m", e);
-						println!("\x1b[1;34m  -->\x1b[m {}", e.location());
-						let mut pp = smt2::syntax::PrettyPrinter::new(&buffer, phrase.location());
-						pp.add_hint(e.location());
-						println!("{}", pp);
+						println!("\x1b[1;34m  -->\x1b[m {} {}", file, e.span());
+						let mut pp = Formatter::new();
+						pp.add(e.span(), None, Style::Error);
+
+						let viewport = phrase.span().aligned();
+						println!("{}", pp.get(buffer.iter_from(viewport.start()), viewport).unwrap());
+
+						std::process::exit(1)
 					}
 				}
 			},
 			Err(e) => {
 				println!("\x1b[1;31mparse error\x1b[m\x1b[1;1m: {}\x1b[m", e);
-				println!("\x1b[1;34m  -->\x1b[m {}", e.location());
-				let mut pp = smt2::syntax::PrettyPrinter::new(&buffer, e.location());
-				pp.add_hint(e.location());
-				println!("{}", pp);
+				println!("\x1b[1;34m  -->\x1b[m {} {}", file, e.span());
+				let mut pp = Formatter::new();
+				pp.add(e.span(), None, Style::Error);
+
+				let viewport = e.span().aligned().inter(buffer.span());
+				let formatted = pp.get(buffer.iter_from(viewport.start()), viewport).unwrap();
+				print!("{}", formatted);
 
 				std::process::exit(1)
 			}

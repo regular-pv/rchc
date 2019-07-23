@@ -93,10 +93,10 @@ impl<F: Clone + PartialEq, T> MatchGraph<F, T> {
 impl<'a> Node<Function, &'a ta::alternating::Clause<u32, Convoluted<u32>>> {
     pub fn to_term(&self, env: &Environment, p: &Rc<Predicate>, function_args: &[smt2::SortedVar<Environment>], mut context_size: usize, variables: &mut Vec<Vec<(usize, Ident)>>) -> smt2::Term<Environment> {
         match self {
-            Node::Node { f, next } => {
+            Node::Node { next, .. } => {
                 let mut cases = Vec::with_capacity(next.len());
                 for n in next.iter() {
-                    if let Node::Node { f, next } = n {
+                    if let Node::Node { f, .. } = n {
                         let (arity, _) = f.arity(env);
                         let new_variables: Vec<(usize, Ident)> = (0..arity).map(|i| {
                             let index = context_size+i;
@@ -192,7 +192,7 @@ impl<'a> MatchGraph<Function, &'a ta::alternating::Clause<u32, Convoluted<u32>>>
         let mut variables: Vec<Vec<(usize, Ident)>> = Vec::new();
         let mut cases = Vec::with_capacity(self.roots.len());
         for n in &self.roots {
-            if let Node::Node { f, next } = n {
+            if let Node::Node { f, .. } = n {
                 let (arity, _) = f.arity(env);
                 let new_variables: Vec<(usize, Ident)> = (0..arity).map(|i| {
                     let index = context_size+i;

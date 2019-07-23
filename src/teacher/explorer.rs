@@ -1,7 +1,5 @@
 use std::collections::HashMap;
-use std::hash::Hash;
 use std::rc::Rc;
-use std::sync::Arc;
 use std::fmt;
 use std::cell::Cell;
 use std::marker::PhantomData;
@@ -23,7 +21,7 @@ use automatic::{
 };
 use crate::{
     rich,
-    environment::{TypedConstructor, Predicate, Sort, ConvolutedSort}
+    environment::{TypedConstructor, Predicate, ConvolutedSort}
 };
 use super::{Teacher, Constraint, Sample, Result};
 
@@ -50,7 +48,6 @@ impl<F: Symbol + fmt::Display, Q: State + fmt::Display, C: Convolution<F>> fmt::
 
 impl<F: Symbol, Q: State, C: Convolution<F>> crate::engine::ToInstance<F> for Relation<F, Q, C> {
     fn to_instance(&self) -> crate::engine::Instance<F> {
-        // println!("instance: {}", self.0);
         let alt = C::generic_automaton(&self.0);
 
         let mut map = HashMap::new();
@@ -58,7 +55,10 @@ impl<F: Symbol, Q: State, C: Convolution<F>> crate::engine::ToInstance<F> for Re
             map.insert(q.clone(), i as u32);
         }
 
-        alt.map_states(|q| *map.get(q).unwrap())
+        crate::engine::Instance {
+            automaton: alt.map_states(|q| *map.get(q).unwrap()),
+            comments: format!("{}", self.0)
+        }
     }
 }
 
@@ -133,7 +133,7 @@ impl<C: Convolution<F>> Explorer<C> {
     ///
     /// This function is used to simplify the clauses, so that each predicate application
     /// only contains variables or terms, but no patterns.
-    pub fn equality_predicate(pattern: &terms::Pattern<F, usize>) -> P {
+    pub fn equality_predicate(_pattern: &terms::Pattern<F, usize>) -> P {
         panic!("TODO equality_predicate")
     }
 }
@@ -173,7 +173,7 @@ impl<C: Convolution<F>> Teacher<F, P, Relation<F, Q, C>> for Explorer<C> {
     type Error = Error;
 
     /// Add a new clause to the solver.
-    fn assert(&mut self, mut clause: rich::Clause<F, P>) -> std::result::Result<(), Error> {
+    fn assert(&mut self, clause: rich::Clause<F, P>) -> std::result::Result<(), Error> {
         let mut body = Vec::with_capacity(clause.body.len());
         for e in clause.body {
             body.push(self.compile_clause_expr(e));
@@ -223,7 +223,7 @@ impl<C: Convolution<F>> Teacher<F, P, Relation<F, Q, C>> for Explorer<C> {
                     Expr::False => {
                         head_automaton = Automaton::new();
                     },
-                    Expr::Apply(p, p_index, pattern) => {
+                    Expr::Apply(p, p_index, _) => {
                         let domain = p.domain();
                         let alphabet = domain.alphabet();
 
@@ -257,7 +257,7 @@ impl<C: Convolution<F>> Teacher<F, P, Relation<F, Q, C>> for Explorer<C> {
                 match &clause.head {
                     Expr::True => panic!("todo Expr::True"),
                     Expr::False => (),
-                    Expr::Apply(p, p_index, pattern) => {
+                    Expr::Apply(_, _, pattern) => {
                         clause_automata.push(&head_automata[k]);
                         patterns.push(pattern.clone());
                     }

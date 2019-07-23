@@ -5,7 +5,7 @@ use std::hash::Hash;
 use automatic::Convoluted;
 use ta::Symbol;
 use crate::{Learner, Teacher, Model, rich};
-use crate::learner::{Sample, Constraint};
+use crate::learner::Constraint;
 pub use crate::teacher::Result;
 
 pub enum Error {
@@ -23,7 +23,10 @@ impl fmt::Display for Error {
     }
 }
 
-pub type Instance<F> = ta::alternating::Automaton<Convoluted<F>, u32, Convoluted<u32>>;
+pub struct Instance<F: Symbol> {
+    pub automaton: ta::alternating::Automaton<Convoluted<F>, u32, Convoluted<u32>>,
+    pub comments: String
+}
 
 pub trait ToInstance<F: Symbol> {
     fn to_instance(&self) -> Instance<F>;
@@ -90,9 +93,10 @@ impl<F: Symbol, P: Clone, I, L, T, M> Engine<F, P, I, L, T, M> where M: Model<P,
     }
 }
 
-impl<F: Symbol, P: Clone + Eq + Hash, I: ToInstance<F>, L, T, M> Abstract<F, P> for Engine<F, P, I, L, T, M> where M: Model<P, I>, L: Learner<F, P, I, Model=M>, T: Teacher<F, P, I, Model=M>, P: fmt::Display, I: fmt::Display {
+impl<F: Symbol, P: Clone + Eq + Hash + fmt::Display, I: ToInstance<F>, L, T, M> Abstract<F, P> for Engine<F, P, I, L, T, M> where M: Model<P, I>, L: Learner<F, P, I, Model=M>, T: Teacher<F, P, I, Model=M>, P: fmt::Display, I: fmt::Display {
     /// Declare a new predicate to solve.
     fn declare_predicate(&mut self, p: P) -> std::result::Result<(), Error> {
+        debug!("engine: declare new predicate `{}`", p);
         self.predicates.push(p.clone());
         Self::learner_result(self.learner.declare_predicate(p))
     }

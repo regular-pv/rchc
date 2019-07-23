@@ -7,7 +7,7 @@ extern crate terms;
 extern crate tree_automata as ta;
 extern crate automatic_relations as automatic;
 
-pub(crate) mod utils;
+// pub(crate) mod utils;
 mod error;
 mod clause;
 mod environment;

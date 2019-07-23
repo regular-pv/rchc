@@ -1,9 +1,8 @@
-/// A CHC teacher.
-///
-/// Provides a trait for CHC teachers, responsible for checking learner guesses and finding new
-/// learning samples.
+//! A CHC teacher.
+//!
+//! Provides a trait for CHC teachers, responsible for checking learner guesses and finding new
+//! learning samples.
 
-use std::hash::Hash;
 use std::fmt;
 
 use crate::rich;

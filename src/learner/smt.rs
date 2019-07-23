@@ -12,18 +12,15 @@ use ta::{
     bottom_up::{Automaton, Configuration}
 };
 use automatic::{Convolution, Convoluted, MaybeBottom};
-use smt2::{Server, Environment, client::{FunctionSignature, Constant, Sorted}, GroundSort};
+use smt2::{Environment, client::{FunctionSignature, Constant, Sorted}, GroundSort};
 use crate::{ConvolutedSort};
-use crate::utils::PList;
 use crate::teacher::explorer::Relation;
 
 use super::{Learner, Constraint, Sample};
 
 pub trait Predicate = Clone + Eq + Hash + fmt::Display;
 
-
-
-pub type Result<T, K: Clone + PartialEq, P: Predicate> = std::result::Result<T, Error<K, P>>;
+pub type Result<T, K, P> = std::result::Result<T, Error<K, P>>;
 
 pub enum Error<K: Clone + PartialEq, P: Predicate> {
     Solver(SolverError<K, P>),
@@ -99,8 +96,8 @@ impl fmt::Display for Sort {
     }
 }
 
-pub type Solver<K: Clone + PartialEq, P> = smt2::Client<&'static str, K, Sort, Function<P>>;
-pub type SolverError<K: Clone + PartialEq, P> = smt2::client::Error<&'static str, K, Sort, Function<P>>;
+pub type Solver<K, P> = smt2::Client<&'static str, K, Sort, Function<P>>;
+pub type SolverError<K, P> = smt2::client::Error<&'static str, K, Sort, Function<P>>;
 
 pub struct SMTLearner<K: Clone + PartialEq, F: Symbol, P: Predicate, C: Convolution<F>> {
     automaton: Vec<Automaton<Rank<Convoluted<F>>, AbsQ, NoLabel>>,
@@ -150,23 +147,23 @@ impl Namespace {
 }
 
 impl<K: Constant + fmt::Display, F: Constructor, P: Predicate, C: Convolution<F>> SMTLearner<K, F, P, C> {
-    pub fn new(mut solver: Solver<K, P>) -> SMTLearner<K, F, P, C> {
+    pub fn new(mut solver: Solver<K, P>) -> Result<SMTLearner<K, F, P, C>, K, P> {
         let const_sort = smt2::GroundSort::new(Sort::Q);
-        solver.declare_sort(Sort::Q);
-        solver.predefined_fun("=", Function::Eq, FunctionSignature::Equality);
-        solver.predefined_fun("not", Function::Not, FunctionSignature::LogicUnary);
-        solver.predefined_fun("and", Function::And, FunctionSignature::LogicNary);
-        solver.predefined_fun("or", Function::Or, FunctionSignature::LogicNary);
-        solver.predefined_fun("=>", Function::Implies, FunctionSignature::LogicBinary);
-        solver.predefined_fun("ite", Function::Ite, FunctionSignature::Ite);
-        SMTLearner {
+        solver.declare_sort(Sort::Q)?;
+        solver.predefined_fun("=", Function::Eq, FunctionSignature::Equality)?;
+        solver.predefined_fun("not", Function::Not, FunctionSignature::LogicUnary)?;
+        solver.predefined_fun("and", Function::And, FunctionSignature::LogicNary)?;
+        solver.predefined_fun("or", Function::Or, FunctionSignature::LogicNary)?;
+        solver.predefined_fun("=>", Function::Implies, FunctionSignature::LogicBinary)?;
+        solver.predefined_fun("ite", Function::Ite, FunctionSignature::Ite)?;
+        Ok(SMTLearner {
             automaton: Vec::new(),
             namespace: Namespace::new(),
             solver: solver,
             const_sort: const_sort,
             predicate_ids: HashMap::new(),
             c: PhantomData
-        }
+        })
     }
 
     fn predicate_id(&self, predicate: &P) -> u32 {
@@ -217,7 +214,7 @@ impl<K: Constant + fmt::Display, F: Constructor, P: Predicate, C: Convolution<F>
             (q, NoLabel)
         });
 
-        for (configuration, q) in &new_transitons {
+        for (_, q) in &new_transitons {
             self.solver.declare_const(q.as_fun(), &self.const_sort)?;
         }
 
@@ -323,7 +320,7 @@ impl<K: Constant + fmt::Display, F: Constructor, P: Predicate, C: Convolution<F>
                 }
                 self.assert_negative(&states)
             },
-            Constraint::Implication(mut lhs, rhs) => {
+            Constraint::Implication(lhs, rhs) => {
                 let mut lhs_states = Vec::with_capacity(lhs.len());
                 for s in lhs.into_iter() {
                     let p = s.0.clone();
@@ -351,7 +348,7 @@ impl<K: Constant + fmt::Display, F: Constructor, P: Predicate, C: Convolution<F>
                     for decl in def.declarations.into_iter() {
                         let body = def.bodies.pop().unwrap();
                         match decl.f {
-                            Function::Q(sort, i) => {
+                            Function::Q(_, i) => {
                                 match body {
                                     smt2::Term::Const(Sorted(c, _)) => {
                                         table.insert(i, c.index());
@@ -379,7 +376,7 @@ impl<K: Constant + fmt::Display, F: Constructor, P: Predicate, C: Convolution<F>
 
                     let mut final_states = HashSet::new();
                     for q in aut.states() {
-                        if let Q::Alive(sort, k) = q {
+                        if let Q::Alive(_, k) = q {
                             if Self::is_final_state(*k, body) {
                                 final_states.insert(q.clone());
                             }
