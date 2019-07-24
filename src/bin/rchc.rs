@@ -113,7 +113,14 @@ fn process_input<Input: Read, F: std::fmt::Display + Clone>(env: &mut rchc::Envi
 						println!("\x1b[1;31merror\x1b[m\x1b[1;1m: {}\x1b[m", e);
 						println!("\x1b[1;34m  -->\x1b[m {} {}", file, e.span());
 						let mut pp = Formatter::new();
-						pp.add(e.span(), None, Style::Error);
+
+						use smt2::Error::*;
+						let label = match e.as_ref() {
+							TypeAmbiguity => Some(format!("use the `(as {} <sort>)` type coercion construct to remove the ambiguity", buffer.iter_span(e.span()).into_string().unwrap())),
+							_ => None
+						};
+
+						pp.add(e.span(), label, Style::Error);
 
 						let viewport = phrase.span().aligned();
 						println!("{}", pp.get(buffer.iter_from(viewport.start()), viewport).unwrap());
