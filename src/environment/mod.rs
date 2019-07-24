@@ -54,7 +54,11 @@ pub struct TypedConstructor {
 
 impl TypedConstructor {
     pub fn parameter(&self, i: usize) -> GroundSort<Arc<Sort>> {
-        panic!("TypedConstructor parameter")
+        let def_option = self.sort.sort.def.read().unwrap();
+        let def = def_option.as_ref().unwrap();
+        let cons = &def.constructors[self.n];
+        let sel = &cons.selectors[i];
+        sel.sort.instanciate(&self.sort.parameters).unwrap()
     }
 }
 

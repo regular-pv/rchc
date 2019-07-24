@@ -1,6 +1,5 @@
 use std::rc::Rc;
 use std::sync::Arc;
-use smt2::Function as SMT2Function;
 use smt2::Environment as SMT2Environment;
 use smt2::GroundSort;
 use ta::Ranked;

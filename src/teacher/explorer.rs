@@ -1,9 +1,11 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 use std::sync::Arc;
 use std::fmt;
 use std::cell::Cell;
 use std::marker::PhantomData;
+use const_vec::ConstVec;
+use once_cell::unsync::OnceCell;
 use terms::{
     Pattern,
     Var
@@ -64,10 +66,57 @@ impl<F: Symbol, Q: State, C: Convolution<F>> crate::engine::ToInstance<F> for Re
     }
 }
 
-pub struct PrimitiveData {
+pub struct PrimitiveDomain {
+    alphabet: HashSet<Rank<Convoluted<F>>>,
+    automaton: Automaton<Rank<Convoluted<F>>, ConvolutedSort, NoLabel>
+}
+
+pub struct PrimitiveData<C: Convolution<F>> {
     primitive: clause::Primitive<GroundSort<Arc<Sort>>>,
     automaton: Automaton<Rank<Convoluted<F>>, Q, NoLabel>,
-    complement: Option<Automaton<Rank<Convoluted<F>>, Q, NoLabel>>
+    domain: OnceCell<PrimitiveDomain>,
+    complement: OnceCell<Automaton<Rank<Convoluted<F>>, Q, NoLabel>>,
+    c: PhantomData<C>
+}
+
+impl<C: Convolution<F>> PrimitiveData<C> {
+    fn domain(&self) -> &PrimitiveDomain {
+        if !self.domain.get().is_some() {
+            let domain = match &self.primitive {
+                clause::Primitive::Eq(sort, n) => {
+                    let mut convoluted_sort = Vec::with_capacity(*n);
+                    convoluted_sort.resize(*n, MaybeBottom::Some(sort.clone()));
+                    let domain = C::state_convolution(Convoluted(convoluted_sort), &());
+                    PrimitiveDomain {
+                        alphabet: domain.alphabet(),
+                        automaton: domain
+                    }
+                }
+            };
+
+            if let Err(_) = self.domain.set(domain) {
+                unreachable!()
+            }
+        }
+
+        self.domain.get().unwrap()
+    }
+
+    fn complement(&self) -> &Automaton<Rank<Convoluted<F>>, Q, NoLabel> {
+        if !self.complement.get().is_some() {
+            let mut complement = self.automaton.clone();
+            let domain = self.domain();
+
+            complement.complete_with(domain.alphabet.iter(), &domain.automaton);
+            complement.complement();
+
+            if let Err(_) = self.complement.set(complement) {
+                unreachable!()
+            }
+        }
+
+        self.complement.get().unwrap()
+    }
 }
 
 /// A simple teacher that explores automata runs to check guesses.
@@ -79,9 +128,7 @@ pub struct Explorer<C: Convolution<F>> {
     clauses: Vec<Clause>,
 
     /// Computed primitives.
-    primitives: Vec<PrimitiveData>,
-
-    c: PhantomData<C>
+    primitives: Vec<PrimitiveData<C>>,
 }
 
 pub enum Expr {
@@ -105,8 +152,7 @@ impl<C: Convolution<F>> Explorer<C> {
         Explorer {
             predicates: HashMap::new(),
             clauses: Vec::new(),
-            primitives: Vec::new(),
-            c: PhantomData
+            primitives: Vec::new()
         }
     }
 
@@ -159,27 +205,22 @@ impl<C: Convolution<F>> Explorer<C> {
             primitive: p.clone(),
             automaton: match p {
                 clause::Primitive::Eq(sort, n) => {
-                    let domain = sort.automaton();
-                    C::equality(domain, n)
+                    let domain: Automaton<TypedConstructor, GroundSort<Arc<Sort>>, NoLabel> = sort.into();
+                    let eq = C::equality(&domain, n);
+                    eq.map_states(|q| {
+                        let mut convoluted_q = Vec::with_capacity(n);
+                        convoluted_q.resize(n, MaybeBottom::Some(q.clone()));
+                        Q::Alive(Convoluted(convoluted_q), 0)
+                    })
                 }
             },
-            complement: None
+            domain: OnceCell::new(),
+            complement: OnceCell::new(),
+            c: PhantomData
         };
 
         self.primitives.push(data);
         i
-    }
-
-    /// For a given pattern p, let's name \omega the ordered list of variables
-    /// occuring in the pattern.
-    /// This function returns a new predicate P such that for all fresh variable x
-    /// and instance \sigma,
-    /// if P(x\sigma, \omega\sigma) then x\sigma = p\sigma.
-    ///
-    /// This function is used to simplify the clauses, so that each predicate application
-    /// only contains variables or terms, but no patterns.
-    pub fn equality_predicate(_pattern: &terms::Pattern<F, usize>) -> P {
-        panic!("TODO equality_predicate")
     }
 }
 
@@ -255,32 +296,37 @@ impl<C: Convolution<F>> Teacher<GroundSort<Arc<Sort>>, F, P, Relation<F, Q, C>> 
             // non-indexed predicates are not important.
         }
 
+        let empty_automaton = Automaton::new();
+        let temp_automata = ConstVec::new(self.clauses.len());
         let mut head_automata = Vec::with_capacity(self.clauses.len());
 
         let learning_constraints = crossbeam_utils::thread::scope(|scope| {
            let mut threads = Vec::with_capacity(self.clauses.len());
 
             for clause in &self.clauses {
-                let mut head_automaton;
+                let head_automaton;
 
                 match &clause.head {
                     Expr::True => panic!("todo Expr::True"),
                     Expr::False => {
-                        head_automaton = Automaton::new();
+                        head_automaton = &empty_automaton;
                     },
                     Expr::Apply(Predicate::User(p, p_index), _) => {
                         let domain = p.domain();
                         let alphabet = domain.alphabet();
 
-                        head_automaton = automata[*p_index].clone();
+                        let mut automaton = automata[*p_index].clone();
 
                         // println!("complete automaton\n{} with domain\n{}", head_automaton, domain);
 
-                        head_automaton.complete_with(alphabet.iter(), domain);
-                        head_automaton.complement();
+                        automaton.complete_with(alphabet.iter(), domain);
+                        automaton.complement();
+
+                        temp_automata.push(automaton);
+                        head_automaton = temp_automata.last().unwrap();
                     },
                     Expr::Apply(Predicate::Primitive(p), _) => {
-                        panic!("TODO eq automaton")
+                        head_automaton = self.primitives[*p].complement();
                     }
                 }
 
@@ -300,7 +346,7 @@ impl<C: Convolution<F>> Teacher<GroundSort<Arc<Sort>>, F, P, Relation<F, Q, C>> 
                             patterns.push(pattern.clone());
                         },
                         Expr::Apply(Predicate::Primitive(p), pattern) => {
-                            panic!("Eq automaton");
+                            clause_automata.push(&self.primitives[*p].automaton);
                             patterns.push(pattern.clone());
                         }
                     }

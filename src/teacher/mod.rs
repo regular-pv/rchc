@@ -5,7 +5,7 @@
 
 use std::fmt;
 
-use crate::clause::{self, Clause};
+use crate::clause::Clause;
 pub use crate::learner::{Model, Sample, Constraint};
 
 pub mod explorer;

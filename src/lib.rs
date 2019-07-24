@@ -1,7 +1,9 @@
-#![feature(trait_alias, type_alias_enum_variants)]
+#![feature(trait_alias)]
 
 #[macro_use]
 extern crate log;
+extern crate const_vec;
+extern crate once_cell;
 extern crate smt2;
 extern crate terms;
 extern crate tree_automata as ta;
