@@ -12,7 +12,7 @@ use ta::{
     bottom_up::{Automaton, Configuration}
 };
 use automatic::{Convolution, Convoluted, MaybeBottom};
-use smt2::{Environment, client::{FunctionSignature, Constant, Sorted}, GroundSort};
+use smt2::{Typed, Sorted, Environment, client::{FunctionSignature, Constant}, GroundSort};
 use crate::{ConvolutedSort};
 use crate::teacher::explorer::Relation;
 
@@ -75,7 +75,7 @@ impl<P: Predicate + fmt::Display> fmt::Display for Function<P> {
     }
 }
 
-#[derive(Clone, PartialEq, Eq, Hash)]
+#[derive(Clone, PartialEq, Eq, Hash, Debug)]
 pub enum Sort {
     Bool,
     Q
@@ -170,11 +170,11 @@ impl<K: Constant + fmt::Display, F: Constructor, P: Predicate, C: Convolution<F>
         *self.predicate_ids.get(predicate).unwrap()
     }
 
-    fn op(&self, op: Function<P>, args: Vec<smt2::Term<Solver<K, P>>>) -> smt2::Term<Solver<K, P>> {
+    fn op(&self, op: Function<P>, args: Vec<Typed<smt2::Term<Solver<K, P>>>>) -> Typed<smt2::Term<Solver<K, P>>> {
         smt2::Term::apply(op, args, self.solver.sort_bool())
     }
 
-    fn as_term(&self, q: &AbsQ) -> smt2::Term<Solver<K, P>> {
+    fn as_term(&self, q: &AbsQ) -> Typed<smt2::Term<Solver<K, P>>> {
         smt2::Term::apply(q.as_fun(), Vec::new(), self.const_sort.clone())
     }
 
@@ -253,15 +253,15 @@ impl<K: Constant + fmt::Display, F: Constructor, P: Predicate, C: Convolution<F>
         Ok(())
     }
 
-    fn is_final_state(state: u32, term: &smt2::Term<Solver<K, P>>) -> bool {
+    fn is_final_state(state: u32, term: &Typed<smt2::Term<Solver<K, P>>>) -> bool {
         #[derive(PartialEq)]
         enum Value {
             Q(u32),
             Bool(bool)
         }
 
-        fn eval<K: Constant, P: Predicate>(state: u32, term: &smt2::Term<Solver<K, P>>) -> Value {
-            match term {
+        fn eval<K: Constant, P: Predicate>(state: u32, term: &Typed<smt2::Term<Solver<K, P>>>) -> Value {
+            match term.as_ref() {
                 smt2::Term::Var { .. } => Value::Q(state),
                 smt2::Term::Const(Sorted(cst, _)) => {
                     Value::Q(cst.index())
@@ -341,7 +341,7 @@ impl<K: Constant + fmt::Display, F: Constructor, P: Predicate, C: Convolution<F>
                 let mut model = HashMap::new();
 
                 let mut table = HashMap::new();
-                let mut predicates_defs: Vec<(P, smt2::Term<Solver<K, P>>)> = Vec::new();
+                let mut predicates_defs: Vec<(P, Typed<smt2::Term<Solver<K, P>>>)> = Vec::new();
 
                 for mut def in smt_model.definitions.into_iter() {
                     def.bodies.reverse();
@@ -349,7 +349,7 @@ impl<K: Constant + fmt::Display, F: Constructor, P: Predicate, C: Convolution<F>
                         let body = def.bodies.pop().unwrap();
                         match decl.f {
                             Function::Q(_, i) => {
-                                match body {
+                                match body.into_inner() {
                                     smt2::Term::Const(Sorted(c, _)) => {
                                         table.insert(i, c.index());
                                     },

@@ -116,7 +116,7 @@ fn process_input<Input: Read, F: std::fmt::Display + Clone>(env: &mut rchc::Envi
 
 						use smt2::Error::*;
 						let label = match e.as_ref() {
-							TypeAmbiguity => Some(format!("use the `(as {} <sort>)` type coercion construct to remove the ambiguity", buffer.iter_span(e.span()).into_string().unwrap())),
+							Type(smt2::typing::Error::Ambiguity) => Some(format!("use the `(as {} <sort>)` type coercion construct to remove the ambiguity", buffer.iter_span(e.span()).into_string().unwrap())),
 							_ => None
 						};
 

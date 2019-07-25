@@ -1,6 +1,8 @@
 use std::collections::HashMap;
 use std::rc::Rc;
+use source_span::Span;
 use automatic::{Convoluted, MaybeBottom};
+use smt2::Typed;
 use crate::{Result, engine};
 use super::{
     Environment,
@@ -90,37 +92,32 @@ impl Environment {
             });
 
             if initial_functions.len() == 1 {
-                let args = p.args.iter().enumerate().map(|(i, a)| smt2::Term::Var {
+                let args = p.args.iter().enumerate().map(|(i, a)| Typed::new(smt2::Term::Var {
                     index: i,
-                    id: format!("BOUND_VARIABLE_{}", i).into(),
-                    sort: a.clone()
-                }).collect();
+                    id: format!("BOUND_VARIABLE_{}", i).into()
+                }, Span::default(), a.clone())).collect();
 
-                bodies.push(smt2::Term::Apply {
+                bodies.push(Typed::new(smt2::Term::Apply {
                     fun: initial_functions.into_iter().next().unwrap(),
-                    args: Box::new(args),
-                    sort: self.sort_bool.clone()
-                })
+                    args: Box::new(args)
+                }, Span::default(), self.sort_bool.clone()))
             } else {
                 let initial_apps = initial_functions.into_iter().map(|fun| {
-                    let args = p.args.iter().enumerate().map(|(i, a)| smt2::Term::Var {
+                    let args = p.args.iter().enumerate().map(|(i, a)| Typed::new(smt2::Term::Var {
                         index: i,
-                        id: format!("BOUND_VARIABLE_{}", i).into(),
-                        sort: a.clone()
-                    }).collect();
+                        id: format!("BOUND_VARIABLE_{}", i).into()
+                    }, Span::default(), a.clone())).collect();
 
-                    smt2::Term::Apply {
+                    Typed::new(smt2::Term::Apply {
                         fun: fun,
-                        args: Box::new(args),
-                        sort: self.sort_bool.clone()
-                    }
+                        args: Box::new(args)
+                    }, Span::default(), self.sort_bool.clone())
                 }).collect();
 
-                bodies.push(smt2::Term::Apply {
+                bodies.push(Typed::new(smt2::Term::Apply {
                     fun: Function::Or,
-                    args: Box::new(initial_apps),
-                    sort: self.sort_bool.clone()
-                })
+                    args: Box::new(initial_apps)
+                }, Span::default(), self.sort_bool.clone()))
             }
 
             definitions.push(smt2::response::Definition {

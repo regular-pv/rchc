@@ -6,7 +6,7 @@ use std::sync::{Arc, RwLock};
 use std::borrow::Borrow;
 use std::fmt;
 
-use smt2::GroundSort;
+use smt2::{Typed, GroundSort};
 use terms::Pattern;
 use ta::{
     bottom_up::{
@@ -15,8 +15,7 @@ use ta::{
     },
     NoLabel,
     Ranked,
-    Rank,
-    SortedWith
+    Rank
 };
 use automatic::{Convoluted, MaybeBottom, convolution::aligned};
 
@@ -62,7 +61,7 @@ impl TypedConstructor {
     }
 }
 
-impl SortedWith<GroundSort<Arc<Sort>>> for TypedConstructor {
+impl ta::SortedWith<GroundSort<Arc<Sort>>> for TypedConstructor {
     fn sort(&self) -> &GroundSort<Arc<Sort>> {
         &self.sort
     }
@@ -410,6 +409,12 @@ pub enum Constant {
     // no constants.
 }
 
+impl smt2::SortedWith<GroundSort<Arc<Sort>>> for Constant {
+    fn sort(&self) -> &GroundSort<Arc<Sort>> {
+        unreachable!()
+    }
+}
+
 impl fmt::Display for Constant {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "@constant")
@@ -486,8 +491,8 @@ impl Environment {
         Ok(self.engine.assert(clause)?)
     }
 
-    pub fn decode_body(&self, term: &Term) -> Result<Vec<clause::Expr<GroundSort<Arc<Sort>>, TypedConstructor, Rc<Predicate>>>> {
-        match term {
+    pub fn decode_body(&self, term: &Typed<Term>) -> Result<Vec<clause::Expr<GroundSort<Arc<Sort>>, TypedConstructor, Rc<Predicate>>>> {
+        match term.as_ref() {
             smt2::Term::Apply { fun: Function::And, args, .. } => {
                 let mut conjuncts = Vec::with_capacity(args.len());
                 for arg in args.iter() {
@@ -499,8 +504,8 @@ impl Environment {
         }
     }
 
-    pub fn decode_expr(&self, term: &Term) -> Result<clause::Expr<GroundSort<Arc<Sort>>, TypedConstructor, Rc<Predicate>>> {
-        match term {
+    pub fn decode_expr(&self, term: &Typed<Term>) -> Result<clause::Expr<GroundSort<Arc<Sort>>, TypedConstructor, Rc<Predicate>>> {
+        match term.as_ref() {
             smt2::Term::Apply { fun: Function::Predicate(p), args, .. } => {
                 let mut patterns = Vec::with_capacity(args.len());
                 for arg in args.iter() {
@@ -513,7 +518,7 @@ impl Environment {
                 for arg in args.iter() {
                     patterns.push(self.decode_pattern(arg)?)
                 }
-                Ok(clause::Expr::Apply(clause::Predicate::Primitive(clause::Primitive::Eq(args[0].sort(self), args.len())), patterns))
+                Ok(clause::Expr::Apply(clause::Predicate::Primitive(clause::Primitive::Eq(args[0].sort().clone(), args.len())), patterns))
             },
             smt2::Term::Var { index, .. } => {
                 Ok(clause::Expr::Var(*index))
@@ -522,16 +527,16 @@ impl Environment {
         }
     }
 
-    pub fn decode_pattern(&self, term: &Term) -> Result<Pattern<TypedConstructor, usize>> {
-        match term {
+    pub fn decode_pattern(&self, term: &Typed<Term>) -> Result<Pattern<TypedConstructor, usize>> {
+        match term.as_ref() {
             smt2::Term::Var { index, .. } => {
                 Ok(Pattern::var(*index))
             },
-            smt2::Term::Apply { fun: Function::Constructor(_, n), args, sort } => {
-                let def = sort.sort.def.read().unwrap();
+            smt2::Term::Apply { fun: Function::Constructor(_, n), args } => {
+                let def = term.sort().sort.def.read().unwrap();
                 let arity = def.as_ref().unwrap().constructors[*n].selectors.len();
                 let f = TypedConstructor {
-                    sort: sort.clone(),
+                    sort: term.sort().clone(),
                     n: *n,
                     arity: arity
                 };
@@ -567,10 +572,6 @@ impl smt2::Environment for Environment {
     /// The Bool sort.
     fn sort_bool(&self) -> GroundSort<Arc<Sort>> {
         self.sort_bool.clone()
-    }
-
-    fn const_sort(&self, _cst: &Constant) -> GroundSort<Arc<Sort>> {
-        panic!("TODO const_sort")
     }
 }
 
@@ -624,14 +625,14 @@ impl smt2::Compiler for Environment {
 
 impl smt2::Server for Environment {
     /// Assert.
-    fn assert(&mut self, term: &Term) -> Result<()> {
+    fn assert(&mut self, term: &Typed<Term>) -> Result<()> {
         // We don't handle every possible assert terms.
         // We need to reject terms that are not HORN clauses,
         // using the "decode" functions.
         use smt2::Term::*;
-        match term {
+        match term.as_ref() {
             Forall { body, .. } => {
-                match body.borrow() {
+                match body.as_ref().as_ref() {
                     Apply { fun: Function::Implies, args, .. } => {
                         let body = self.decode_body(&args[0])?;
                         let head = self.decode_expr(&args[1])?;
@@ -648,7 +649,7 @@ impl smt2::Server for Environment {
                 }
             },
             Apply { fun: Function::Not, args, .. } => {
-                match args[0].borrow() {
+                match args[0].as_ref() {
                     Exists { body, .. } => {
                         let body = self.decode_body(&body)?;
                         self.register_clause(Clause::new(body, clause::Expr::False))?;
@@ -657,8 +658,8 @@ impl smt2::Server for Environment {
                     _ => Err(Error::InvalidAssertion)
                 }
             },
-            term => {
-                let head = self.decode_expr(&term)?;
+            _ => {
+                let head = self.decode_expr(term)?;
                 self.register_clause(Clause::new(Vec::new(), head))?;
                 Ok(())
             }

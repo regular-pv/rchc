@@ -1,7 +1,8 @@
 use std::rc::Rc;
 use std::sync::Arc;
+use source_span::Span;
 use smt2::Environment as SMT2Environment;
-use smt2::GroundSort;
+use smt2::{Typed, GroundSort};
 use ta::Ranked;
 use automatic::MaybeBottom;
 use super::{Environment, Predicate, Sort, TypedConstructor, Function, Ident, Convoluted};
@@ -93,7 +94,8 @@ impl<F: Clone + PartialEq, T> MatchGraph<F, T> {
 }
 
 impl<'a> Node<TypedConstructor, &'a ta::alternating::Clause<u32, Convoluted<u32>>> {
-    pub fn to_term(&self, env: &Environment, p: &Rc<Predicate>, function_args: &[smt2::SortedVar<Environment>], k: usize, mut context_size: usize, variables: &mut Vec<Vec<(usize, GroundSort<Arc<Sort>>, Ident)>>) -> smt2::Term<Environment> {
+    pub fn to_term(&self, env: &Environment, p: &Rc<Predicate>, function_args: &[smt2::SortedVar<Environment>], k: usize, mut context_size: usize, variables: &mut Vec<Vec<(usize, GroundSort<Arc<Sort>>, Ident)>>) -> Typed<smt2::Term<Environment>> {
+        let sort = function_args[k].sort.clone();
         match self {
             Node::Node { next, .. } => {
                 let mut cases = Vec::with_capacity(next.len());
@@ -117,7 +119,7 @@ impl<'a> Node<TypedConstructor, &'a ta::alternating::Clause<u32, Convoluted<u32>
                         variables.push(new_variables);
 
                         cases.push(smt2::MatchCase {
-                            pattern: pattern,
+                            pattern: Typed::new(pattern, Span::default(), sort.clone()),
                             term: Box::new(n.to_term(env, p, function_args, k+1, context_size, variables))
                         });
 
@@ -133,20 +135,19 @@ impl<'a> Node<TypedConstructor, &'a ta::alternating::Clause<u32, Convoluted<u32>
 
                     if cases.len() < len {
                         cases.push(smt2::MatchCase {
-                            pattern: smt2::Pattern::Var("_".into()),
-                            term: Box::new(smt2::Term::Apply {
+                            pattern: Typed::new(smt2::Pattern::Var("_".into()), Span::default(), sort.clone()),
+                            term: Box::new(Typed::new(smt2::Term::Apply {
                                 fun: env.false_fun(),
-                                args: Box::new(vec![]),
-                                sort: env.sort_bool()
-                            })
+                                args: Box::new(vec![])
+                            }, Span::default(), env.sort_bool()))
                         });
                     }
                 }
 
-                smt2::Term::Match {
-                    term: Box::new(smt2::Term::Var { index: k, id: function_args[k].id.clone(), sort: function_args[k].sort.clone() }),
+                Typed::new(smt2::Term::Match {
+                    term: Box::new(Typed::new(smt2::Term::Var { index: k, id: function_args[k].id.clone()}, Span::default(), sort)),
                     cases: cases
-                }
+                }, Span::default(), env.sort_bool())
             },
             Node::Leaf(clause) => {
                 let clause_terms: Vec<_> = clause.iter().map(|conjunction| {
@@ -158,37 +159,33 @@ impl<'a> Node<TypedConstructor, &'a ta::alternating::Clause<u32, Convoluted<u32>
                         for i in indexes.iter() {
                             if let MaybeBottom::Some(i) = i {
                                 let (index, sort, id) = variables[k][*i as usize].clone();
-                                args.push(smt2::Term::Var {
+                                args.push(Typed::new(smt2::Term::Var {
                                     index: index,
-                                    id: id,
-                                    sort: sort
-                                });
+                                    id: id
+                                }, Span::default(), sort));
                                 k += 1;
                             }
                         }
 
-                        smt2::Term::Apply {
+                        Typed::new(smt2::Term::Apply {
                             fun: Function::State(p.clone(), *q, signature),
-                            args: Box::new(args),
-                            sort: env.sort_bool()
-                        }
+                            args: Box::new(args)
+                        }, Span::default(), env.sort_bool())
                     }).collect();
 
                     if conjunction_terms.is_empty() {
-                        smt2::Term::Apply {
+                        Typed::new(smt2::Term::Apply {
                             fun: env.true_fun(),
                             args: Box::new(vec![]),
-                            sort: env.sort_bool()
-                        }
+                        }, Span::default(), env.sort_bool())
                     } else {
                         if conjunction_terms.len() == 1 {
                             conjunction_terms.into_iter().next().unwrap()
                         } else {
-                            smt2::Term::Apply {
+                            Typed::new(smt2::Term::Apply {
                                 fun: Function::And,
                                 args: Box::new(conjunction_terms),
-                                sort: env.sort_bool()
-                            }
+                            }, Span::default(), env.sort_bool())
                         }
                     }
                 }).collect();
@@ -196,11 +193,10 @@ impl<'a> Node<TypedConstructor, &'a ta::alternating::Clause<u32, Convoluted<u32>
                 if clause_terms.len() == 1 {
                     clause_terms.into_iter().next().unwrap()
                 } else {
-                    smt2::Term::Apply {
+                    Typed::new(smt2::Term::Apply {
                         fun: Function::Or,
-                        args: Box::new(clause_terms),
-                        sort: env.sort_bool()
-                    }
+                        args: Box::new(clause_terms)
+                    }, Span::default(), env.sort_bool())
                 }
             }
         }
@@ -208,7 +204,8 @@ impl<'a> Node<TypedConstructor, &'a ta::alternating::Clause<u32, Convoluted<u32>
 }
 
 impl<'a> MatchGraph<TypedConstructor, &'a ta::alternating::Clause<u32, Convoluted<u32>>> {
-    pub fn to_term(&self, env: &Environment, p: &Rc<Predicate>, function_args: &[smt2::SortedVar<Environment>], mut context_size: usize) -> smt2::Term<Environment> {
+    pub fn to_term(&self, env: &Environment, p: &Rc<Predicate>, function_args: &[smt2::SortedVar<Environment>], mut context_size: usize) -> Typed<smt2::Term<Environment>> {
+        let sort = function_args[0].sort.clone();
         let mut variables: Vec<Vec<(usize, GroundSort<Arc<Sort>>, Ident)>> = Vec::new();
         let mut cases = Vec::with_capacity(self.roots.len());
         for n in &self.roots {
@@ -221,12 +218,12 @@ impl<'a> MatchGraph<TypedConstructor, &'a ta::alternating::Clause<u32, Convolute
                 }).collect();
                 context_size += arity;
 
-                let pattern = smt2::Pattern::Cons {
+                let pattern = Typed::new(smt2::Pattern::Cons {
                     constructor: Function::Constructor(f.sort.sort.clone(), f.n),
                     args: new_variables.iter().map(|(_, _, id)| {
                         id.clone()
                     }).collect()
-                };
+                }, Span::default(), sort.clone());
 
                 variables.push(new_variables);
 
@@ -245,19 +242,18 @@ impl<'a> MatchGraph<TypedConstructor, &'a ta::alternating::Clause<u32, Convolute
 
             if cases.len() < len {
                 cases.push(smt2::MatchCase {
-                    pattern: smt2::Pattern::Var("_".into()),
-                    term: Box::new(smt2::Term::Apply {
+                    pattern: Typed::new(smt2::Pattern::Var("_".into()), Span::default(), sort.clone()),
+                    term: Box::new(Typed::new(smt2::Term::Apply {
                         fun: env.false_fun(),
-                        args: Box::new(vec![]),
-                        sort: env.sort_bool()
-                    })
+                        args: Box::new(vec![])
+                    }, Span::default(), env.sort_bool()))
                 });
             }
         }
 
-        smt2::Term::Match {
-            term: Box::new(smt2::Term::Var { index: 0, id: function_args[0].id.clone(), sort: function_args[0].sort.clone() }),
+        Typed::new(smt2::Term::Match {
+            term: Box::new(Typed::new(smt2::Term::Var { index: 0, id: function_args[0].id.clone() }, Span::default(), sort)),
             cases: cases
-        }
+        }, Span::default(), env.sort_bool())
     }
 }
