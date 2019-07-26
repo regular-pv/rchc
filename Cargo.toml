@@ -17,3 +17,4 @@ terms = { path = "../../../timbuk-rs/terms" }
 tree-automata = { path = "../../../timbuk-rs/tree-automata" }
 automatic-relations = { path = "../../../timbuk-rs/automatic-relations" }
 crossbeam-utils = "*"
+rust-embed = "*"

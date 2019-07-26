@@ -48,14 +48,17 @@ impl Environment {
 
                 for (signature, match_graph) in &match_graphs {
                     let mut args = Vec::new();
+                    let mut indexed_args = Vec::new();
                     let mut s = *signature;
                     let mut full_sig = true;
                     for (i, sort) in p.args.iter().enumerate().rev() {
                         if s & 1 != 0 {
-                            args.push(smt2::SortedVar {
+                            let arg = smt2::SortedVar {
                                 id: format!("BOUND_VARIABLE_{}", i),
                                 sort: sort.clone()
-                            });
+                            };
+                            args.push(arg.clone());
+                            indexed_args.push((arg, i));
                         } else {
                             full_sig = false;
                         }
@@ -63,8 +66,9 @@ impl Environment {
                         s >>= 1;
                     }
                     args.reverse();
+                    indexed_args.reverse();
 
-                    bodies.push(match_graph.to_term(self, &p, &args, p.args.len()));
+                    bodies.push(match_graph.to_term(self, &p, &indexed_args, p.args.len()));
 
                     let q_fun = Function::State(p.clone(), *q, *signature);
 

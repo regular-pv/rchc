@@ -8,10 +8,16 @@ extern crate source_span;
 extern crate smt2;
 extern crate rchc;
 extern crate automatic_relations as automatic;
+#[macro_use]
+extern crate rust_embed;
+
+#[derive(RustEmbed)]
+#[folder = "src/assets"]
+struct Asset;
 
 use std::io::Read;
 use std::rc::Rc;
-use utf8_decode::UnsafeDecoder;
+use utf8_decode::{Decoder, UnsafeDecoder};
 use source_span::{
 	Position,
 	lazy::Buffer,
@@ -44,13 +50,15 @@ fn main() {
 	let engine = rchc::Engine::new(learner, teacher);
 	let mut env = rchc::Environment::new(engine);
 
+	load_asset(&mut env, "default.smt2");
+
     // Choose the input.
     let stdin = std::io::stdin();
     match matches.value_of("INPUT") {
         Some(filename) => {
             info!("reading file: `{}'.", filename);
             match std::fs::File::open(filename) {
-                Ok(file) => process_input(&mut env, file, filename),
+                Ok(file) => process_input(&mut env, filename, file),
                 Err(e) => {
                     error!("unable to open file `{}': {}", filename, e);
                     std::process::exit(1)
@@ -59,7 +67,7 @@ fn main() {
         },
         None => {
             info!("reading standard input.");
-            process_input(&mut env, stdin.lock(), "stdin".to_string())
+            process_input(&mut env, "stdin".to_string(), stdin.lock())
         }
     }
 }
@@ -81,11 +89,23 @@ fn load_smt_solver() -> smt2::Client<&'static str, smt2::client::cvc4::Constant,
 	}
 }
 
+fn load_asset(env: &mut rchc::Environment, name: &str) {
+	let data = Asset::get(name).unwrap();
+	let start = Position::default();
+	let decoder = Decoder::new(data.iter().cloned());
+	let buffer = Buffer::new(decoder, start);
+	process_buffer(env, name, buffer, start)
+}
+
 /// Process a given SMT2-lib input.
-fn process_input<Input: Read, F: std::fmt::Display + Clone>(env: &mut rchc::Environment, input: Input, file: F) {
+fn process_input<Input: Read, F: std::fmt::Display + Clone>(env: &mut rchc::Environment, file: F, input: Input) {
 	let start = Position::default();
 	let decoder = UnsafeDecoder::new(input.bytes());
 	let buffer = Buffer::new(decoder, start);
+	process_buffer(env, file, buffer, start)
+}
+
+fn process_buffer<I: Iterator<Item = std::io::Result<char>>, F: std::fmt::Display + Clone>(env: &mut rchc::Environment, file: F, buffer: Buffer<I>, start: Position) {
 	let mut lexer = smt2::Lexer::new(buffer.iter(), start).peekable();
 
 	// read command until end of file.
@@ -97,48 +117,22 @@ fn process_input<Input: Read, F: std::fmt::Display + Clone>(env: &mut rchc::Envi
 						match cmd.exec(env) {
 							Ok(()) => (),
 							Err(e) => {
-								println!("\x1b[1;31mruntime error\x1b[m\x1b[1;1m: {}\x1b[m", e);
-								println!("\x1b[1;34m  -->\x1b[m {} {}", file, phrase.span());
-								let mut pp = Formatter::new();
-								pp.add(phrase.span(), None, Style::Error);
-
 								let viewport = phrase.span().aligned();
-								println!("{}", pp.get(buffer.iter_from(viewport.start()), viewport).unwrap());
-
+								smt2::error::Infos::print_at(&e, file, &buffer, viewport, phrase.span());
 								std::process::exit(1)
 							}
 						}
 					},
 					Err(e) => {
-						println!("\x1b[1;31merror\x1b[m\x1b[1;1m: {}\x1b[m", e);
-						println!("\x1b[1;34m  -->\x1b[m {} {}", file, e.span());
-						let mut pp = Formatter::new();
-
-						use smt2::Error::*;
-						let label = match e.as_ref() {
-							Type(smt2::typing::Error::Ambiguity) => Some(format!("use the `(as {} <sort>)` type coercion construct to remove the ambiguity", buffer.iter_span(e.span()).into_string().unwrap())),
-							_ => None
-						};
-
-						pp.add(e.span(), label, Style::Error);
-
 						let viewport = phrase.span().aligned();
-						println!("{}", pp.get(buffer.iter_from(viewport.start()), viewport).unwrap());
-
+						smt2::error::Infos::print(e, file, &buffer, viewport);
 						std::process::exit(1)
 					}
 				}
 			},
 			Err(e) => {
-				println!("\x1b[1;31mparse error\x1b[m\x1b[1;1m: {}\x1b[m", e);
-				println!("\x1b[1;34m  -->\x1b[m {} {}", file, e.span());
-				let mut pp = Formatter::new();
-				pp.add(e.span(), None, Style::Error);
-
 				let viewport = e.span().aligned().inter(buffer.span());
-				let formatted = pp.get(buffer.iter_from(viewport.start()), viewport).unwrap();
-				print!("{}", formatted);
-
+				smt2::error::Infos::print(e, file, &buffer, viewport);
 				std::process::exit(1)
 			}
 		}

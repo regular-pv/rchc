@@ -6,7 +6,7 @@ use std::sync::{Arc, RwLock};
 use std::borrow::Borrow;
 use std::fmt;
 
-use smt2::{Typed, GroundSort};
+use smt2::{Typed, GroundSort, TypeChecker, TypeRef, GroundTypeRef};
 use terms::Pattern;
 use ta::{
     bottom_up::{
@@ -19,7 +19,7 @@ use ta::{
 };
 use automatic::{Convoluted, MaybeBottom, convolution::aligned};
 
-use crate::{Error, Result, clause::{self, Clause}, engine};
+use crate::{error, Error, Result, clause::{self, Clause}, engine};
 
 mod match_graph;
 mod produce_model;
@@ -255,79 +255,6 @@ impl smt2::Function<Environment> for Function {
             Function::State(p, _, _) => p.arity(env)
         }
     }
-
-    fn typecheck(&self, env: &Environment, args: &[GroundSort<Arc<Sort>>]) -> std::result::Result<GroundSort<Arc<Sort>>, smt2::TypeCheckError<Arc<Sort>>> {
-        use smt2::TypeCheckError::*;
-        match self {
-            Function::Eq => {
-                for (i, arg) in args.iter().enumerate() {
-                    if i > 0 {
-                        if *arg != args[0] {
-                            return Err(Missmatch(i, (&args[0]).into()))
-                        }
-                    }
-                }
-                Ok(env.sort_bool.clone())
-            },
-            Function::Not => {
-                for (i, arg) in args.iter().enumerate() {
-                    if *arg != env.sort_bool {
-                        return Err(Missmatch(i, (&env.sort_bool).into()))
-                    }
-                }
-                Ok(env.sort_bool.clone())
-            },
-            Function::And | Function::Or => {
-                for (i, arg) in args.iter().enumerate() {
-                    if *arg != env.sort_bool {
-                        return Err(Missmatch(i, (&env.sort_bool).into()))
-                    }
-                }
-                Ok(env.sort_bool.clone())
-            }
-            Function::Implies => {
-                for (i, arg) in args.iter().enumerate() {
-                    if *arg != env.sort_bool {
-                        return Err(Missmatch(i, (&env.sort_bool).into()))
-                    }
-                }
-                Ok(env.sort_bool.clone())
-            },
-            Function::Predicate(p) => p.typecheck(env, args),
-            Function::Constructor(sort, n) => {
-                let def_option = sort.def.read().unwrap();
-                let def = def_option.as_ref().unwrap();
-                let cons = &def.constructors[*n];
-
-                let mut context = Vec::new();
-                context.resize(def.parameters.len(), None);
-
-                for (i, arg) in args.iter().enumerate() {
-                    let selector = &cons.selectors[i];
-
-                    if let Err(sort) = selector.sort.typecheck(&mut context, arg) {
-                        return Err(Missmatch(i, sort))
-                    }
-                }
-
-                let mut parameters = Vec::with_capacity(context.len());
-                for (i, p) in context.drain(..).enumerate() {
-                    match p {
-                        Some(param) => parameters.push(param),
-                        None => return Err(Ambiguity(i))
-                    }
-                }
-
-                Ok(GroundSort {
-                    sort: sort.clone(),
-                    parameters: parameters
-                })
-            },
-            _ => {
-                unreachable!()
-            }
-        }
-    }
 }
 
 struct PredicateData {
@@ -366,6 +293,14 @@ impl Predicate {
     pub fn alphabet(&self) -> &HashSet<Rank<Convoluted<TypedConstructor>>> {
         &self.data().alphabet
     }
+
+    fn typecheck(&self, checker: &mut TypeChecker<Arc<Sort>>, env: &Environment, args: &[TypeRef<Arc<Sort>>], return_sort: TypeRef<Arc<Sort>>) {
+        use smt2::TypeCheckError::*;
+        for (i, arg) in args.iter().enumerate() {
+            checker.assert_equal(self.args[i].clone(), arg.clone())
+        }
+        checker.assert_equal(env.sort_bool.clone(), return_sort);
+    }
 }
 
 impl PartialEq for Predicate {
@@ -391,16 +326,6 @@ impl fmt::Display for Predicate {
 impl smt2::Function<Environment> for Predicate {
     fn arity(&self, _env: &Environment) -> (usize, usize) {
         (self.args.len(), self.args.len())
-    }
-
-    fn typecheck(&self, env: &Environment, args: &[GroundSort<Arc<Sort>>]) -> std::result::Result<GroundSort<Arc<Sort>>, smt2::TypeCheckError<Arc<Sort>>> {
-        use smt2::TypeCheckError::*;
-        for (i, arg) in args.iter().enumerate() {
-            if *arg != self.args[i] {
-                return Err(Missmatch(i, (&self.args[i]).into()))
-            }
-        }
-        Ok(env.sort_bool.clone())
     }
 }
 
@@ -496,7 +421,13 @@ impl Environment {
             smt2::Term::Apply { fun: Function::And, args, .. } => {
                 let mut conjuncts = Vec::with_capacity(args.len());
                 for arg in args.iter() {
-                    conjuncts.push(self.decode_expr(arg)?)
+                    match arg.as_ref() {
+                        smt2::Term::Apply { fun: Function::And, .. } => {
+                            let sub_body = self.decode_body(arg)?;
+                            conjuncts.extend(sub_body.into_iter());
+                        },
+                        _ => conjuncts.push(self.decode_expr(arg)?)
+                    }
                 }
                 Ok(conjuncts)
             },
@@ -523,7 +454,7 @@ impl Environment {
             smt2::Term::Var { index, .. } => {
                 Ok(clause::Expr::Var(*index))
             },
-            _ => Err(Error::InvalidAssertion)
+            _ => Err(Error::InvalidAssertion(term.span(), error::InvalidAssertionReason::Expr))
         }
     }
 
@@ -548,7 +479,7 @@ impl Environment {
 
                 Ok(Pattern::cons(f, sub_patterns))
             },
-            _ => Err(Error::InvalidAssertion)
+            _ => Err(Error::InvalidAssertion(term.span(), error::InvalidAssertionReason::Pattern))
         }
     }
 }
@@ -572,6 +503,57 @@ impl smt2::Environment for Environment {
     /// The Bool sort.
     fn sort_bool(&self) -> GroundSort<Arc<Sort>> {
         self.sort_bool.clone()
+    }
+
+    fn typecheck_function(&self, checker: &mut TypeChecker<Arc<Sort>>, f: &Function, args: &[TypeRef<Arc<Sort>>], return_sort: TypeRef<Arc<Sort>>) {
+        use smt2::TypeCheckError::*;
+        match f {
+            Function::Eq => {
+                for (i, arg) in args.iter().enumerate() {
+                    if i > 0 {
+                        checker.assert_equal(args[0].clone(), arg.clone());
+                    }
+                }
+                checker.assert_equal(self.sort_bool(), return_sort);
+            },
+            Function::Not => {
+                checker.assert_equal(self.sort_bool(), args[0].clone());
+                checker.assert_equal(self.sort_bool(), return_sort);
+            },
+            Function::And | Function::Or | Function::Implies => {
+                for arg in args.iter() {
+                    checker.assert_equal(self.sort_bool(), arg.clone());
+                }
+                checker.assert_equal(self.sort_bool(), return_sort);
+            }
+            Function::Predicate(p) => p.typecheck(checker, self, args, return_sort),
+            Function::Constructor(sort, n) => {
+                let def_option = sort.def.read().unwrap();
+                let def = def_option.as_ref().unwrap();
+                let cons = &def.constructors[*n];
+
+                let mut parameters = Vec::new();
+                for p in &def.parameters {
+                    parameters.push(checker.new_type_variable(checker.location()))
+                }
+
+                for (i, arg_ty) in args.iter().enumerate() {
+                    let selector = &cons.selectors[i];
+                    let expected_ty = selector.sort.as_type_ref(&parameters);
+
+                    checker.assert_equal(expected_ty, arg_ty.clone());
+                }
+
+                let expected_return_sort = TypeRef::Ground(GroundTypeRef {
+                    sort: sort.clone(),
+                    parameters: parameters
+                });
+                checker.assert_equal(expected_return_sort, return_sort);
+            },
+            _ => {
+                unreachable!()
+            }
+        }
     }
 }
 
@@ -645,7 +627,7 @@ impl smt2::Server for Environment {
                         self.register_clause(Clause::new(body, head))?;
                         Ok(())
                     },
-                    _ => Err(Error::InvalidAssertion)
+                    _ => Err(Error::InvalidAssertion(body.span(), error::InvalidAssertionReason::AssertForallBody))
                 }
             },
             Apply { fun: Function::Not, args, .. } => {
@@ -655,7 +637,7 @@ impl smt2::Server for Environment {
                         self.register_clause(Clause::new(body, clause::Expr::False))?;
                         Ok(())
                     },
-                    _ => Err(Error::InvalidAssertion)
+                    _ => Err(Error::InvalidAssertion(args[0].span(), error::InvalidAssertionReason::AssertNotBody))
                 }
             },
             _ => {

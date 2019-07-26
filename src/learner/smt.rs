@@ -244,12 +244,26 @@ impl<K: Constant + fmt::Display, F: Constructor, P: Predicate, C: Convolution<F>
     }
 
     fn assert_implication(&mut self, lhs: &[(P, AbsQ)], rhs: (P, AbsQ)) -> Result<(), K, P> {
-        self.solver.assert(&self.op(Function::Implies, vec![
-            self.op(Function::And, lhs.iter().map(|(p, q)| {
-                self.op(Function::Predicate(p.clone()), vec![self.as_term(&q)])
-            }).collect()),
-            self.op(Function::Predicate(rhs.0.clone()), vec![self.as_term(&rhs.1)])
-        ]))?;
+        match lhs.len() {
+            0 => {
+                self.solver.assert(&self.op(Function::Predicate(rhs.0.clone()), vec![self.as_term(&rhs.1)]))?;
+            },
+            1 => {
+                let (p, q) = &lhs[0];
+                self.solver.assert(&self.op(Function::Implies, vec![
+                    self.op(Function::Predicate(p.clone()), vec![self.as_term(&q)]),
+                    self.op(Function::Predicate(rhs.0.clone()), vec![self.as_term(&rhs.1)])
+                ]))?;
+            },
+            _ => {
+                self.solver.assert(&self.op(Function::Implies, vec![
+                    self.op(Function::And, lhs.iter().map(|(p, q)| {
+                        self.op(Function::Predicate(p.clone()), vec![self.as_term(&q)])
+                    }).collect()),
+                    self.op(Function::Predicate(rhs.0.clone()), vec![self.as_term(&rhs.1)])
+                ]))?;
+            }
+        }
         Ok(())
     }
 
