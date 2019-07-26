@@ -437,19 +437,27 @@ impl Environment {
 
     pub fn decode_expr(&self, term: &Typed<Term>) -> Result<clause::Expr<GroundSort<Arc<Sort>>, TypedConstructor, Rc<Predicate>>> {
         match term.as_ref() {
+            smt2::Term::Apply { fun: Function::Not, args, .. } => {
+                match self.decode_expr(&args[0])? {
+                    clause::Expr::Apply(clause::Predicate::Primitive(p, positive), patterns) => {
+                        Ok(clause::Expr::Apply(clause::Predicate::Primitive(p.clone(), !positive), patterns.clone()))
+                    },
+                    _ => Err(Error::InvalidAssertion(term.span(), error::InvalidAssertionReason::ExprNot))
+                }
+            },
             smt2::Term::Apply { fun: Function::Predicate(p), args, .. } => {
                 let mut patterns = Vec::with_capacity(args.len());
                 for arg in args.iter() {
                     patterns.push(self.decode_pattern(arg)?)
                 }
-                Ok(clause::Expr::Apply(clause::Predicate::User(p.clone()), patterns))
+                Ok(clause::Expr::Apply(clause::Predicate::User(p.clone(), true), patterns))
             },
             smt2::Term::Apply { fun: Function::Eq, args, .. } => {
                 let mut patterns = Vec::with_capacity(args.len());
                 for arg in args.iter() {
                     patterns.push(self.decode_pattern(arg)?)
                 }
-                Ok(clause::Expr::Apply(clause::Predicate::Primitive(clause::Primitive::Eq(args[0].sort().clone(), args.len())), patterns))
+                Ok(clause::Expr::Apply(clause::Predicate::Primitive(clause::Primitive::Eq(args[0].sort().clone(), args.len()), true), patterns))
             },
             smt2::Term::Var { index, .. } => {
                 Ok(clause::Expr::Var(*index))

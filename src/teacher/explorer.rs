@@ -138,7 +138,7 @@ pub enum Expr {
 }
 
 pub enum Predicate {
-    Primitive(usize),
+    Primitive(usize, bool),
     User(P, usize)
 }
 
@@ -172,7 +172,11 @@ impl<C: Convolution<F>> Explorer<C> {
             clause::Expr::Var(_) => {
                 panic!("TODO variable")
             },
-            clause::Expr::Apply(clause::Predicate::User(p), patterns) => {
+            clause::Expr::Apply(clause::Predicate::User(p, positive), patterns) => {
+                if !positive {
+                    panic!("negated predicate")
+                }
+
                 let index = if let Some(index) = self.index_of(&p) {
                     index
                 } else {
@@ -185,10 +189,10 @@ impl<C: Convolution<F>> Explorer<C> {
                 let convoluted_pattern = Convoluted(patterns);
                 Expr::Apply(Predicate::User(p, index), convoluted_pattern)
             },
-            clause::Expr::Apply(clause::Predicate::Primitive(primitive), patterns) => {
+            clause::Expr::Apply(clause::Predicate::Primitive(primitive, positive), patterns) => {
                 let patterns = patterns.into_iter().map(|p| MaybeBottom::Some(p)).collect();
                 let convoluted_pattern = Convoluted(patterns);
-                Expr::Apply(Predicate::Primitive(self.get_primitve_index(primitive)), convoluted_pattern)
+                Expr::Apply(Predicate::Primitive(self.get_primitve_index(primitive), positive), convoluted_pattern)
             }
         }
     }
@@ -325,8 +329,12 @@ impl<C: Convolution<F>> Teacher<GroundSort<Arc<Sort>>, F, P, Relation<F, Q, C>> 
                         temp_automata.push(automaton);
                         head_automaton = temp_automata.last().unwrap();
                     },
-                    Expr::Apply(Predicate::Primitive(p), _) => {
-                        head_automaton = self.primitives[*p].complement();
+                    Expr::Apply(Predicate::Primitive(p, positive), _) => {
+                        if *positive {
+                            head_automaton = &self.primitives[*p].automaton;
+                        } else {
+                            head_automaton = self.primitives[*p].complement();
+                        }
                     }
                 }
 
@@ -345,9 +353,14 @@ impl<C: Convolution<F>> Teacher<GroundSort<Arc<Sort>>, F, P, Relation<F, Q, C>> 
                             clause_automata.push(automata[*p_index]);
                             patterns.push(pattern.clone());
                         },
-                        Expr::Apply(Predicate::Primitive(p), pattern) => {
-                            clause_automata.push(&self.primitives[*p].automaton);
-                            patterns.push(pattern.clone());
+                        Expr::Apply(Predicate::Primitive(p, positive), pattern) => {
+                            if *positive {
+                                clause_automata.push(&self.primitives[*p].automaton);
+                                patterns.push(pattern.clone());
+                            } else {
+                                clause_automata.push(self.primitives[*p].complement());
+                                patterns.push(pattern.clone());
+                            }
                         }
                     }
                 }
@@ -391,11 +404,11 @@ impl<C: Convolution<F>> Teacher<GroundSort<Arc<Sort>>, F, P, Relation<F, Q, C>> 
 
                     {
                         let terms = C::search(&clause_automata, searchable_patterns).next();
-                        // if let Some(terms) = &terms {
-                        //     println!("found {}", crate::utils::PList(&terms, ","));
-                        // } else {
-                        //     println!("empty");
-                        // }
+                        if let Some(terms) = &terms {
+                            println!("found {}", crate::utils::PList(&terms, ","));
+                        } else {
+                            println!("empty");
+                        }
                         terms
                     }
                     //None

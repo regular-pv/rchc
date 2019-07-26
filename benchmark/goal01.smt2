@@ -1,6 +1,5 @@
 (set-logic HORN)
 
-(declare-fun incorrect ( ) Bool)
 (declare-fun diff_list ( (List Nat) (List Nat) ) Bool)
 (declare-fun drop ( Nat (List Nat) (List Nat) ) Bool)
 (declare-fun append ( (List Nat) (List Nat) (List Nat) ) Bool)
@@ -90,20 +89,6 @@
   )
 )
 (assert
-  (forall ( (A Nat) (B (List Nat)) (C (List Nat)) (D (List Nat)) (E (List Nat)) )
-    (=>
-      (and
-        (diff_list D E)
-        (take A E B)
-        (drop A E C)
-        (append B C D)
-        true
-      )
-      incorrect
-    )
-  )
-)
-(assert
   (forall ( (A (List Nat)) (B Nat) (C (List Nat)) (v_3 (List Nat)) )
     (=>
       (and
@@ -145,13 +130,14 @@
   )
 )
 (assert
-  (forall ( (CHC_COMP_UNUSED Bool) )
-    (=>
+  (forall ( (A Nat) (B (List Nat)) (C (List Nat)) (D (List Nat)) (E (List Nat)) )
+    (not
       (and
-        incorrect
-        true
+        (diff_list D E)
+        (take A E B)
+        (drop A E C)
+        (append B C D)
       )
-      false
     )
   )
 )

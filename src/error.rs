@@ -19,6 +19,7 @@ pub enum InvalidAssertionReason {
     AssertForallBody,
     AssertNotBody,
     Expr,
+    ExprNot,
     Pattern
 }
 
@@ -57,6 +58,9 @@ impl smt2::error::Informative for Error {
                     },
                     Expr => {
                         i.add(*span, Some("this must be a predicate or primitive application".to_string()))
+                    },
+                    ExprNot => {
+                        i.add(*span, Some("only primitive application are allowed under `not`".to_string()))
                     },
                     Pattern => {
                         i.add(*span, Some("this must be a pattern".to_string()))

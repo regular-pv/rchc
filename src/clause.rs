@@ -8,10 +8,10 @@ pub enum Primitive<S: Clone + PartialEq> {
 
 #[derive(Clone)]
 pub enum Predicate<S: Clone + PartialEq, P: Clone> {
-    Primitive(Primitive<S>),
+    Primitive(Primitive<S>, bool),
 
     // User-defined predicate
-    User(P)
+    User(P, bool)
 }
 
 pub enum Expr<S: Clone + PartialEq, F: Clone, P: Clone> {
