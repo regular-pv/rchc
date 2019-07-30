@@ -6,6 +6,8 @@ use std::cell::Cell;
 use std::marker::PhantomData;
 use const_vec::ConstVec;
 use once_cell::unsync::OnceCell;
+use rand::prelude::*;
+use rand::seq::SliceRandom;
 use terms::{
     Pattern,
     Var
@@ -27,7 +29,7 @@ use crate::{
     clause,
     environment::{TypedConstructor, Sort, ConvolutedSort}
 };
-use super::{Teacher, Constraint, Sample, Result};
+use super::{Teacher, Constraint, Sample, Result, Options};
 
 pub enum Error {
     //
@@ -50,7 +52,7 @@ impl<F: Symbol + fmt::Display, Q: State + fmt::Display, C: Convolution<F>> fmt::
     }
 }
 
-impl<F: Symbol, Q: State, C: Convolution<F>> crate::engine::ToInstance<F> for Relation<F, Q, C> {
+impl<F: Symbol + fmt::Display, Q: State + fmt::Display, C: Convolution<F>> crate::engine::ToInstance<F> for Relation<F, Q, C> {
     fn to_instance(&self) -> crate::engine::Instance<F> {
         let alt = C::generic_automaton(&self.0);
 
@@ -129,6 +131,9 @@ pub struct Explorer<C: Convolution<F>> {
 
     /// Computed primitives.
     primitives: Vec<PrimitiveData<C>>,
+
+    /// Teacher options.
+    options: Options
 }
 
 pub enum Expr {
@@ -139,7 +144,7 @@ pub enum Expr {
 
 pub enum Predicate {
     Primitive(usize, bool),
-    User(P, usize)
+    User(P, usize, bool)
 }
 
 pub struct Clause {
@@ -148,11 +153,12 @@ pub struct Clause {
 }
 
 impl<C: Convolution<F>> Explorer<C> {
-    pub fn new() -> Explorer<C> {
+    pub fn new(options: Options) -> Explorer<C> {
         Explorer {
             predicates: HashMap::new(),
             clauses: Vec::new(),
-            primitives: Vec::new()
+            primitives: Vec::new(),
+            options: options
         }
     }
 
@@ -173,10 +179,6 @@ impl<C: Convolution<F>> Explorer<C> {
                 panic!("TODO variable")
             },
             clause::Expr::Apply(clause::Predicate::User(p, positive), patterns) => {
-                if !positive {
-                    panic!("negated predicate")
-                }
-
                 let index = if let Some(index) = self.index_of(&p) {
                     index
                 } else {
@@ -187,7 +189,7 @@ impl<C: Convolution<F>> Explorer<C> {
 
                 let patterns = patterns.into_iter().map(|p| MaybeBottom::Some(p)).collect();
                 let convoluted_pattern = Convoluted(patterns);
-                Expr::Apply(Predicate::User(p, index), convoluted_pattern)
+                Expr::Apply(Predicate::User(p, index, positive), convoluted_pattern)
             },
             clause::Expr::Apply(clause::Predicate::Primitive(primitive, positive), patterns) => {
                 let patterns = patterns.into_iter().map(|p| MaybeBottom::Some(p)).collect();
@@ -225,6 +227,72 @@ impl<C: Convolution<F>> Explorer<C> {
 
         self.primitives.push(data);
         i
+    }
+
+    fn generate_learning_constraint(&self, mut convoluted_terms: Vec<terms::Term<Rank<Convoluted<TypedConstructor>>>>, i: usize) -> Constraint<TypedConstructor, P> {
+        let clause = &self.clauses[i];
+
+        if clause.body.is_empty() {
+            // positive example.
+            match &clause.head {
+                Expr::Apply(Predicate::User(p, _, positive), _) => {
+                    let sample = convoluted_terms.pop().unwrap();
+                    Constraint::Positive(Sample(p.clone(), *positive, sample))
+                },
+                Expr::Apply(_, _) => {
+                    panic!("found a positive example for a primitive!")
+                },
+                _ => unreachable!()
+            }
+        } else {
+            match &clause.head {
+                Expr::Apply(Predicate::User(head_p, _, positive), _) => {
+                    // implication constraint.
+                    let head_t = convoluted_terms.pop().unwrap();
+                    let head_sample = Sample(head_p.clone(), *positive, head_t);
+
+                    let mut samples = Vec::new();
+                    convoluted_terms.reverse();
+                    for e in &clause.body {
+                        match e {
+                            Expr::True => (),
+                            Expr::Apply(Predicate::User(p, _, positive), _) => {
+                                let t = convoluted_terms.pop().unwrap();
+                                samples.push(Sample(p.clone(), *positive, t))
+                            },
+                            Expr::Apply(_, _) => {
+                                convoluted_terms.pop().unwrap();
+                                // ignore what we already know.
+                            },
+                            Expr::False => unreachable!()
+                        }
+                    }
+
+                    Constraint::Implication(samples, head_sample)
+                },
+                Expr::False | Expr::Apply(_, _) => {
+                    let mut samples = Vec::new();
+                    convoluted_terms.reverse();
+                    for e in &clause.body {
+                        match e {
+                            Expr::True => (),
+                            Expr::Apply(Predicate::User(p, _, positive), _) => {
+                                let t = convoluted_terms.pop().unwrap();
+                                samples.push(Sample(p.clone(), *positive, t))
+                            },
+                            Expr::Apply(_, _) => {
+                                convoluted_terms.pop().unwrap();
+                                // ignore what we already know.
+                            },
+                            Expr::False => unreachable!()
+                        }
+                    }
+
+                    Constraint::Negative(samples)
+                },
+                Expr::True => unreachable!()
+            }
+        }
     }
 }
 
@@ -293,19 +361,41 @@ impl<C: Convolution<F>> Teacher<GroundSort<Arc<Sort>>, F, P, Relation<F, Q, C>> 
             }
         }
 
+        let mut state_count = 0;
         for (p, aut) in model.iter() {
+            if aut.0.len() > state_count {
+                state_count = aut.0.len()
+            }
             if let Some(i) = self.index_of(p) {
                 automata[i] = &aut.0;
             }
             // non-indexed predicates are not important.
         }
 
+        info!("largest automaton has {} states", state_count);
+        if state_count >= self.options.max_states {
+            return Ok(Result::Unknown)
+        }
+
+        // The empty automaton, that we can convert into a reference.
         let empty_automaton = Automaton::new();
+
+        // This ConstVec will contain every computed complement automaton.
         let temp_automata = ConstVec::new(self.clauses.len());
+        // Contains the index of the complement in `temp_automata` for each automaton if any.
+        // So we don't have to compute the complement more than once.
+        let mut temp_index = Vec::with_capacity(self.clauses.len());
+        temp_index.resize(self.clauses.len(), None);
+
         let mut head_automata = Vec::with_capacity(self.clauses.len());
 
         let learning_constraints = crossbeam_utils::thread::scope(|scope| {
-           let mut threads = Vec::with_capacity(self.clauses.len());
+            let mut threads = Vec::with_capacity(self.clauses.len());
+            let (sender, receiver) = crossbeam_channel::bounded(self.clauses.len());
+            let (kill_sender, kill_receiver) = crossbeam_channel::bounded(self.clauses.len());
+
+            let mut rng = rand::thread_rng();
+            self.clauses.shuffle(&mut rng);
 
             for clause in &self.clauses {
                 let head_automaton;
@@ -315,19 +405,24 @@ impl<C: Convolution<F>> Teacher<GroundSort<Arc<Sort>>, F, P, Relation<F, Q, C>> 
                     Expr::False => {
                         head_automaton = &empty_automaton;
                     },
-                    Expr::Apply(Predicate::User(p, p_index), _) => {
-                        let domain = p.domain();
-                        let alphabet = domain.alphabet();
+                    Expr::Apply(Predicate::User(p, p_index, positive), _) => {
+                        if *positive {
+                            let domain = p.domain();
+                            let alphabet = domain.alphabet();
 
-                        let mut automaton = automata[*p_index].clone();
+                            let mut automaton = automata[*p_index].clone();
 
-                        // println!("complete automaton\n{} with domain\n{}", head_automaton, domain);
+                            // println!("complete automaton\n{} with domain\n{}", head_automaton, domain);
 
-                        automaton.complete_with(alphabet.iter(), domain);
-                        automaton.complement();
+                            automaton.complete_with(alphabet.iter(), domain);
+                            automaton.complement();
 
-                        temp_automata.push(automaton);
-                        head_automaton = temp_automata.last().unwrap();
+                            temp_index[*p_index] = Some(temp_automata.len());
+                            temp_automata.push(automaton);
+                            head_automaton = temp_automata.last().unwrap();
+                        } else {
+                            head_automaton = &automata[*p_index];
+                        }
                     },
                     Expr::Apply(Predicate::Primitive(p, positive), _) => {
                         if *positive {
@@ -349,8 +444,25 @@ impl<C: Convolution<F>> Teacher<GroundSort<Arc<Sort>>, F, P, Relation<F, Q, C>> 
                     match e {
                         Expr::True => panic!("todo Expr::True"),
                         Expr::False => panic!("todo Expr::False"),
-                        Expr::Apply(Predicate::User(_, p_index), pattern) => {
-                            clause_automata.push(automata[*p_index]);
+                        Expr::Apply(Predicate::User(p, p_index, positive), pattern) => {
+                            if *positive {
+                                clause_automata.push(automata[*p_index]);
+                            } else {
+                                let complement_index = if let Some(i) = temp_index[*p_index] {
+                                    i
+                                } else {
+                                    let domain = p.domain();
+                                    let alphabet = domain.alphabet();
+                                    let mut automaton = automata[*p_index].clone();
+                                    automaton.complete_with(alphabet.iter(), domain);
+                                    automaton.complement();
+                                    let complement_index = temp_automata.len();
+                                    temp_index[*p_index] = Some(complement_index);
+                                    temp_automata.push(automaton);
+                                    complement_index
+                                };
+                                clause_automata.push(&temp_automata[complement_index]);
+                            }
                             patterns.push(pattern.clone());
                         },
                         Expr::Apply(Predicate::Primitive(p, positive), pattern) => {
@@ -380,6 +492,8 @@ impl<C: Convolution<F>> Teacher<GroundSort<Arc<Sort>>, F, P, Relation<F, Q, C>> 
                 //     println!("pattern: {}", patterns[i]);
                 // }
 
+                let thread_sender = sender.clone();
+                let thread_kill = kill_receiver.clone();
                 let handle = scope.spawn(move |_| {
                     // Make the variable Spawnable.
                     let namespace: Cell<usize> = Cell::new(0);
@@ -403,13 +517,14 @@ impl<C: Convolution<F>> Teacher<GroundSort<Arc<Sort>>, F, P, Relation<F, Q, C>> 
                     }).collect();
 
                     {
-                        let terms = C::search(&clause_automata, searchable_patterns).next();
-                        if let Some(terms) = &terms {
-                            println!("found {}", crate::utils::PList(&terms, ","));
-                        } else {
-                            println!("empty");
-                        }
-                        terms
+                        let terms = C::search(&clause_automata, searchable_patterns, thread_kill).next();
+                        // if let Some(terms) = &terms {
+                        //     println!("found {}", crate::utils::PList(&terms, ","));
+                        // } else {
+                        //     println!("empty");
+                        // }
+                        thread_sender.send((terms, k));
+                        //terms
                     }
                     //None
                 });
@@ -418,76 +533,30 @@ impl<C: Convolution<F>> Teacher<GroundSort<Arc<Sort>>, F, P, Relation<F, Q, C>> 
             }
 
             let mut learning_constraints = Vec::new();
-            for (i, handle) in threads.into_iter().enumerate() {
-                if let Some(mut convoluted_terms) = handle.join().unwrap() {
-                    let clause = &self.clauses[i];
-
-                    if clause.body.is_empty() {
-                        // positive example.
-                        match &clause.head {
-                            Expr::Apply(Predicate::User(p, _), _) => {
-                                let sample = convoluted_terms.pop().unwrap();
-                                let constraint = Constraint::Positive(Sample(p.clone(), sample));
-                                learning_constraints.push(constraint);
-                            },
-                            Expr::Apply(_, _) => {
-                                panic!("found a positive example for a primitive!")
-                            },
-                            _ => unreachable!()
-                        }
-                    } else {
-                        match &clause.head {
-                            Expr::Apply(Predicate::User(head_p, _), _) => {
-                                // implication constraint.
-                                let head_t = convoluted_terms.pop().unwrap();
-                                let head_sample = Sample(head_p.clone(), head_t);
-
-                                let mut samples = Vec::new();
-                                convoluted_terms.reverse();
-                                for e in &clause.body {
-                                    match e {
-                                        Expr::True => (),
-                                        Expr::Apply(Predicate::User(p, _), _) => {
-                                            let t = convoluted_terms.pop().unwrap();
-                                            samples.push(Sample(p.clone(), t))
-                                        },
-                                        Expr::Apply(_, _) => {
-                                            convoluted_terms.pop().unwrap();
-                                            // ignore what we already know.
-                                        },
-                                        Expr::False => unreachable!()
-                                    }
+            let mut received = 0;
+            if !self.clauses.is_empty() {
+                loop {
+                    match receiver.recv().unwrap() {
+                        (Some(Ok(convoluted_terms)), i) => {
+                            learning_constraints.push(self.generate_learning_constraint(convoluted_terms, i));
+                            if self.options.learn_fast {
+                                for _ in &self.clauses {
+                                    kill_sender.send(()); // kill them all!
                                 }
-
-                                let constraint = Constraint::Implication(samples, head_sample);
-                                learning_constraints.push(constraint);
-                            },
-                            Expr::False | Expr::Apply(_, _) => {
-                                let mut samples = Vec::new();
-                                convoluted_terms.reverse();
-                                for e in &clause.body {
-                                    match e {
-                                        Expr::True => (),
-                                        Expr::Apply(Predicate::User(p, _), _) => {
-                                            let t = convoluted_terms.pop().unwrap();
-                                            samples.push(Sample(p.clone(), t))
-                                        },
-                                        Expr::Apply(_, _) => {
-                                            convoluted_terms.pop().unwrap();
-                                            // ignore what we already know.
-                                        },
-                                        Expr::False => unreachable!()
-                                    }
-                                }
-
-                                let constraint = Constraint::Negative(samples);
-                                learning_constraints.push(constraint);
-                            },
-                            Expr::True => unreachable!()
+                            }
+                            break
+                        },
+                        (_, _) => {
+                            received += 1;
+                            if received >= self.clauses.len() {
+                                break
+                            }
                         }
                     }
                 }
             }
+
+            // println!("FOUND!");
 
             learning_constraints
         }).unwrap();

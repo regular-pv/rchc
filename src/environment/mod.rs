@@ -274,7 +274,7 @@ impl Predicate {
         match data {
             Some(data) => data,
             None => {
-                let convoluted_sort = Convoluted(self.args.iter().map(|sort| MaybeBottom::Some(sort.clone())).collect());
+                let convoluted_sort = self.domain_sort();
                 let domain = aligned::automaton::state_convolution(convoluted_sort, &());
                 let alphabet = domain.alphabet();
                 *data = Some(PredicateData {
@@ -284,6 +284,10 @@ impl Predicate {
                 data.as_ref().unwrap()
             }
         }
+    }
+
+    pub fn domain_sort(&self) -> ConvolutedSort {
+        Convoluted(self.args.iter().map(|sort| MaybeBottom::Some(sort.clone())).collect())
     }
 
     pub fn domain(&self) -> &Automaton<Rank<Convoluted<TypedConstructor>>, ConvolutedSort, NoLabel> {
@@ -441,6 +445,9 @@ impl Environment {
                 match self.decode_expr(&args[0])? {
                     clause::Expr::Apply(clause::Predicate::Primitive(p, positive), patterns) => {
                         Ok(clause::Expr::Apply(clause::Predicate::Primitive(p.clone(), !positive), patterns.clone()))
+                    },
+                    clause::Expr::Apply(clause::Predicate::User(p, positive), patterns) => {
+                        Ok(clause::Expr::Apply(clause::Predicate::User(p.clone(), !positive), patterns.clone()))
                     },
                     _ => Err(Error::InvalidAssertion(term.span(), error::InvalidAssertionReason::ExprNot))
                 }
@@ -635,7 +642,11 @@ impl smt2::Server for Environment {
                         self.register_clause(Clause::new(body, head))?;
                         Ok(())
                     },
-                    _ => Err(Error::InvalidAssertion(body.span(), error::InvalidAssertionReason::AssertForallBody))
+                    _ => {
+                        let head = self.decode_expr(body.as_ref())?;
+                        self.register_clause(Clause::new(Vec::new(), head))?;
+                        Ok(())
+                    }
                 }
             },
             Apply { fun: Function::Not, args, .. } => {
@@ -720,7 +731,8 @@ impl smt2::Server for Environment {
                 data: UnsafeCell::new(None)
             });
             self.functions.insert(id.clone(), Function::Predicate(p.clone()));
-            self.engine.declare_predicate(p)?;
+            let domain_sort = p.domain_sort();
+            self.engine.declare_predicate(p, domain_sort)?;
             Ok(())
         }
     }

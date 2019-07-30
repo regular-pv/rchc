@@ -9,3 +9,9 @@
     (par (T) ( (nil) (insert (head T) (tail (List T))) ))
   )
 )
+
+(declare-datatypes ( (Tsil 1) )
+  (
+    (par (T) ( (lin) (tresni (lait (Tsil T)) (daeh T)) ))
+  )
+)

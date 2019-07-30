@@ -60,7 +60,7 @@ impl smt2::error::Informative for Error {
                         i.add(*span, Some("this must be a predicate or primitive application".to_string()))
                     },
                     ExprNot => {
-                        i.add(*span, Some("only primitive application are allowed under `not`".to_string()))
+                        i.add(*span, Some("only predicate applications are allowed under `not`".to_string()))
                     },
                     Pattern => {
                         i.add(*span, Some("this must be a pattern".to_string()))

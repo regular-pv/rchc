@@ -11,6 +11,20 @@ pub use crate::learner::{Model, Sample, Constraint};
 pub mod explorer;
 pub use explorer::Explorer;
 
+pub struct Options {
+    pub learn_fast: bool,
+    pub max_states: usize
+}
+
+impl Default for Options {
+    fn default() -> Options {
+        Options {
+            learn_fast: false,
+            max_states: std::usize::MAX
+        }
+    }
+}
+
 /// Teacher check results.
 pub enum Result<F, P> {
     Sat,

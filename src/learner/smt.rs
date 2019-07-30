@@ -99,8 +99,13 @@ impl fmt::Display for Sort {
 pub type Solver<K, P> = smt2::Client<&'static str, K, Sort, Function<P>>;
 pub type SolverError<K, P> = smt2::client::Error<&'static str, K, Sort, Function<P>>;
 
+pub struct PredicateData<F: Symbol> {
+    automaton: Automaton<Rank<Convoluted<F>>, AbsQ, NoLabel>,
+    domain: ConvolutedSort
+}
+
 pub struct SMTLearner<K: Clone + PartialEq, F: Symbol, P: Predicate, C: Convolution<F>> {
-    automaton: Vec<Automaton<Rank<Convoluted<F>>, AbsQ, NoLabel>>,
+    predicates: Vec<PredicateData<F>>,
     solver: Solver<K, P>,
     namespace: Namespace,
     const_sort: smt2::GroundSort<Sort>,
@@ -157,7 +162,7 @@ impl<K: Constant + fmt::Display, F: Constructor, P: Predicate, C: Convolution<F>
         solver.predefined_fun("=>", Function::Implies, FunctionSignature::LogicBinary)?;
         solver.predefined_fun("ite", Function::Ite, FunctionSignature::Ite)?;
         Ok(SMTLearner {
-            automaton: Vec::new(),
+            predicates: Vec::new(),
             namespace: Namespace::new(),
             solver: solver,
             const_sort: const_sort,
@@ -179,7 +184,7 @@ impl<K: Constant + fmt::Display, F: Constructor, P: Predicate, C: Convolution<F>
     }
 
     fn declare_transition(&mut self, predicate: u32, Configuration(f, states): &Configuration<Rank<Convoluted<F>>, AbsQ>, q: AbsQ) -> Result<(), K, P> {
-        for (Configuration(other_f, other_states), _, other_q) in self.automaton[predicate as usize].transitions() {
+        for (Configuration(other_f, other_states), _, other_q) in self.predicates[predicate as usize].automaton.transitions() {
             if f == other_f {
                 let mut clause = vec![self.op(Function::Eq, vec![self.as_term(&q), self.as_term(other_q)])];
                 for (i, sub_state) in states.iter().enumerate() {
@@ -198,7 +203,7 @@ impl<K: Constant + fmt::Display, F: Constructor, P: Predicate, C: Convolution<F>
     fn add_term(&mut self, predicate: u32, term: Term<Rank<Convoluted<F>>>) -> Result<AbsQ, K, P> {
         let namespace = &mut self.namespace;
         let mut new_transitons = Vec::new();
-        let term_q = self.automaton[predicate as usize].add_normalized(&term, &mut |configuration| {
+        let term_q = self.predicates[predicate as usize].automaton.add_normalized(&term, &mut |configuration| {
             let convoluted_f = configuration.symbol();
             let mut conv_sort = Vec::with_capacity(convoluted_f.0.len());
             for f in convoluted_f.0.iter() {
@@ -225,42 +230,50 @@ impl<K: Constant + fmt::Display, F: Constructor, P: Predicate, C: Convolution<F>
         Ok(term_q)
     }
 
-    fn add_sample(&mut self, Sample(predicate, term): Sample<P, F>) -> Result<AbsQ, K, P> {
+    fn add_sample(&mut self, Sample(predicate, _, term): Sample<P, F>) -> Result<AbsQ, K, P> {
         self.add_term(self.predicate_id(&predicate), term)
     }
 
-    fn assert_positive(&mut self, p: P, q: AbsQ) -> Result<(), K, P> {
-        self.solver.assert(&self.op(Function::Predicate(p.clone()), vec![self.as_term(&q)]))?;
+    fn application_term(&self, p: &P, positive: bool, q: &AbsQ) -> Typed<smt2::Term<Solver<K, P>>> {
+        if positive {
+            self.op(Function::Predicate(p.clone()), vec![self.as_term(q)])
+        } else {
+            self.op(Function::Not, vec![self.op(Function::Predicate(p.clone()), vec![self.as_term(&q)])])
+        }
+    }
+
+    fn assert_positive(&mut self, p: P, positive: bool, q: AbsQ) -> Result<(), K, P> {
+        self.solver.assert(&self.application_term(&p, positive, &q))?;
         Ok(())
     }
 
-    fn assert_negative(&mut self, states: &[(P, AbsQ)]) -> Result<(), K, P> {
+    fn assert_negative(&mut self, states: &[(P, bool, AbsQ)]) -> Result<(), K, P> {
         self.solver.assert(&self.op(Function::Not, vec![
-            self.op(Function::And, states.iter().map(|(p, q)| {
-                self.op(Function::Predicate(p.clone()), vec![self.as_term(&q)])
+            self.op(Function::And, states.iter().map(|(p, pos, q)| {
+                self.application_term(p, *pos, q)
             }).collect())
         ]))?;
         Ok(())
     }
 
-    fn assert_implication(&mut self, lhs: &[(P, AbsQ)], rhs: (P, AbsQ)) -> Result<(), K, P> {
+    fn assert_implication(&mut self, lhs: &[(P, bool, AbsQ)], rhs: (P, bool, AbsQ)) -> Result<(), K, P> {
         match lhs.len() {
             0 => {
-                self.solver.assert(&self.op(Function::Predicate(rhs.0.clone()), vec![self.as_term(&rhs.1)]))?;
+                self.solver.assert(&self.application_term(&rhs.0, rhs.1, &rhs.2))?;
             },
             1 => {
-                let (p, q) = &lhs[0];
+                let (p, pos, q) = &lhs[0];
                 self.solver.assert(&self.op(Function::Implies, vec![
-                    self.op(Function::Predicate(p.clone()), vec![self.as_term(&q)]),
-                    self.op(Function::Predicate(rhs.0.clone()), vec![self.as_term(&rhs.1)])
+                    self.application_term(p, *pos, q),
+                    self.application_term(&rhs.0, rhs.1, &rhs.2)
                 ]))?;
             },
             _ => {
                 self.solver.assert(&self.op(Function::Implies, vec![
-                    self.op(Function::And, lhs.iter().map(|(p, q)| {
-                        self.op(Function::Predicate(p.clone()), vec![self.as_term(&q)])
+                    self.op(Function::And, lhs.iter().map(|(p, pos, q)| {
+                        self.application_term(p, *pos, q)
                     }).collect()),
-                    self.op(Function::Predicate(rhs.0.clone()), vec![self.as_term(&rhs.1)])
+                    self.application_term(&rhs.0, rhs.1, &rhs.2)
                 ]))?;
             }
         }
@@ -310,10 +323,13 @@ impl<K: Constant + fmt::Display, F: Constructor, P: Predicate, C: Convolution<F>
     type Error = Error<K, P>;
 
     /// Declare a new predicate to learn.
-    fn declare_predicate(&mut self, p: P) -> Result<(), K, P> {
-        let index = self.automaton.len() as u32;
+    fn declare_predicate(&mut self, p: P, domain: ConvolutedSort) -> Result<(), K, P> {
+        let index = self.predicates.len() as u32;
         self.predicate_ids.insert(p.clone(), index);
-        self.automaton.push(Automaton::new());
+        self.predicates.push(PredicateData {
+            automaton: Automaton::new(),
+            domain: domain
+        });
 
         Ok(self.solver.declare_fun(Function::Predicate(p), &vec![self.const_sort.clone()], &self.solver.sort_bool())?)
     }
@@ -323,14 +339,16 @@ impl<K: Constant + fmt::Display, F: Constructor, P: Predicate, C: Convolution<F>
         match new_constraint {
             Constraint::Positive(sample) => {
                 let p = sample.0.clone();
+                let pos = sample.1;
                 let q = self.add_sample(sample)?;
-                self.assert_positive(p, q)
+                self.assert_positive(p, pos, q)
             },
             Constraint::Negative(mut samples) => {
                 let mut states = Vec::with_capacity(samples.len());
                 for s in samples.drain(..) {
                     let p = s.0.clone();
-                    states.push((p, self.add_sample(s)?))
+                    let pos = s.1;
+                    states.push((p, pos, self.add_sample(s)?))
                 }
                 self.assert_negative(&states)
             },
@@ -338,11 +356,13 @@ impl<K: Constant + fmt::Display, F: Constructor, P: Predicate, C: Convolution<F>
                 let mut lhs_states = Vec::with_capacity(lhs.len());
                 for s in lhs.into_iter() {
                     let p = s.0.clone();
-                    lhs_states.push((p, self.add_sample(s)?))
+                    let pos = s.1;
+                    lhs_states.push((p, pos, self.add_sample(s)?))
                 }
                 let rhs_p = rhs.0.clone();
+                let rhs_pos = rhs.1;
                 let rhs_state = self.add_sample(rhs)?;
-                self.assert_implication(&lhs_states, (rhs_p, rhs_state))
+                self.assert_implication(&lhs_states, (rhs_p, rhs_pos, rhs_state))
             }
         }
     }
@@ -380,7 +400,8 @@ impl<K: Constant + fmt::Display, F: Constructor, P: Predicate, C: Convolution<F>
 
                 for (p, body) in &predicates_defs {
                     let i = self.predicate_id(p) as usize;
-                    let abs_aut = &self.automaton[i];
+                    let data = &self.predicates[i];
+                    let abs_aut = &data.automaton;
                     // println!("-----------");
                     // println!("abs_aut: {}", abs_aut);
                     //let mut final_states = HashSet::new();
@@ -390,8 +411,8 @@ impl<K: Constant + fmt::Display, F: Constructor, P: Predicate, C: Convolution<F>
 
                     let mut final_states = HashSet::new();
                     for q in aut.states() {
-                        if let Q::Alive(_, k) = q {
-                            if Self::is_final_state(*k, body) {
+                        if let Q::Alive(sort, k) = q {
+                            if *sort == data.domain && Self::is_final_state(*k, body) {
                                 final_states.insert(q.clone());
                             }
                         }

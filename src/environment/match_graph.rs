@@ -171,7 +171,7 @@ impl<'a> Node<TypedConstructor, &'a ta::alternating::Clause<u32, Convoluted<u32>
                                 }, Span::default(), sort));
                             }
 
-                            if function_args[k].1 == i {
+                            if k < function_args.len() && function_args[k].1 == i {
                                 k += 1;
                             }
                         }

@@ -4,7 +4,7 @@ use std::collections::HashMap;
 use std::hash::Hash;
 use automatic::Convoluted;
 use ta::Symbol;
-use crate::{Learner, Teacher, Model, clause::Clause};
+use crate::{Learner, Teacher, Model, clause::Clause, ConvolutedSort};
 use crate::learner::Constraint;
 pub use crate::teacher::Result;
 
@@ -34,7 +34,7 @@ pub trait ToInstance<F: Symbol> {
 
 pub trait Abstract<S: Clone + PartialEq, F: Symbol, P: Clone> {
     /// Declare a new predicate to solve.
-    fn declare_predicate(&mut self, p: P) -> std::result::Result<(), Error>;
+    fn declare_predicate(&mut self, p: P, domain: ConvolutedSort) -> std::result::Result<(), Error>;
 
     /// Add a new clause to the solver.
     fn assert(&mut self, clause: Clause<S, F, P>) -> std::result::Result<(), Error>;
@@ -97,10 +97,10 @@ impl<S: Clone + PartialEq, F: Symbol, P: Clone, I, L, T, M> Engine<S, F, P, I, L
 
 impl<S: Clone + PartialEq, F: Symbol, P: Clone + Eq + Hash + fmt::Display, I: ToInstance<F>, L, T, M> Abstract<S, F, P> for Engine<S, F, P, I, L, T, M> where M: Model<P, I>, L: Learner<F, P, I, Model=M>, T: Teacher<S, F, P, I, Model=M>, P: fmt::Display, I: fmt::Display {
     /// Declare a new predicate to solve.
-    fn declare_predicate(&mut self, p: P) -> std::result::Result<(), Error> {
+    fn declare_predicate(&mut self, p: P, domain: ConvolutedSort) -> std::result::Result<(), Error> {
         debug!("engine: declare new predicate `{}`", p);
         self.predicates.push(p.clone());
-        Self::learner_result(self.learner.declare_predicate(p))
+        Self::learner_result(self.learner.declare_predicate(p, domain))
     }
 
     /// Add a new clause to the solver.
@@ -110,10 +110,18 @@ impl<S: Clone + PartialEq, F: Symbol, P: Clone + Eq + Hash + fmt::Display, I: To
 
     /// Find the next model and check it.
     fn check(&mut self) -> std::result::Result<Option<Result<F, P>>, Error> {
+        info!("model search...");
         self.model = Self::learner_result(self.learner.produce_model())?;
         match &self.model {
-            Some(model) => Ok(Some(Self::teacher_result(self.teacher.check(model))?)),
-            None => Ok(None)
+            Some(model) => {
+                info!("model found.");
+                info!("checking...");
+                Ok(Some(Self::teacher_result(self.teacher.check(model))?))
+            },
+            None => {
+                info!("no model found.");
+                Ok(None)
+            }
         }
     }
 

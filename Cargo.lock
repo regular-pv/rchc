@@ -24,6 +24,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 name = "automatic-relations"
 version = "0.1.0"
 dependencies = [
+ "crossbeam-channel 0.3.9 (registry+https://github.com/rust-lang/crates.io-index)",
  "terms 0.1.0",
  "tree-automata 0.1.0",
 ]
@@ -88,6 +89,14 @@ dependencies = [
 [[package]]
 name = "const-vec"
 version = "0.1.0"
+
+[[package]]
+name = "crossbeam-channel"
+version = "0.3.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+dependencies = [
+ "crossbeam-utils 0.6.5 (registry+https://github.com/rust-lang/crates.io-index)",
+]
 
 [[package]]
 name = "crossbeam-utils"
@@ -253,12 +262,14 @@ dependencies = [
  "automatic-relations 0.1.0",
  "clap 2.27.1 (registry+https://github.com/rust-lang/crates.io-index)",
  "const-vec 0.1.0",
+ "crossbeam-channel 0.3.9 (registry+https://github.com/rust-lang/crates.io-index)",
  "crossbeam-utils 0.6.5 (registry+https://github.com/rust-lang/crates.io-index)",
  "log 0.4.6 (registry+https://github.com/rust-lang/crates.io-index)",
  "once_cell 0.2.4 (registry+https://github.com/rust-lang/crates.io-index)",
+ "rand 0.7.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "rust-embed 5.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "smt2 0.1.0",
- "source-span 1.2.0",
+ "source-span 1.3.0",
  "stderrlog 0.4.1 (registry+https://github.com/rust-lang/crates.io-index)",
  "terms 0.1.0",
  "tree-automata 0.1.0",
@@ -351,13 +362,13 @@ name = "smt2"
 version = "0.1.0"
 dependencies = [
  "ena 0.13.0 (registry+https://github.com/rust-lang/crates.io-index)",
- "source-span 1.2.0",
+ "source-span 1.3.0",
  "utf8-decode 1.0.1 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
 
 [[package]]
 name = "source-span"
-version = "1.2.0"
+version = "1.3.0"
 dependencies = [
  "termion 1.5.3 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
@@ -464,6 +475,7 @@ dependencies = [
 name = "tree-automata"
 version = "0.1.0"
 dependencies = [
+ "crossbeam-channel 0.3.9 (registry+https://github.com/rust-lang/crates.io-index)",
  "term-rewriting 0.1.0",
  "terms 0.1.0",
 ]
@@ -549,6 +561,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 "checksum chrono 0.4.6 (registry+https://github.com/rust-lang/crates.io-index)" = "45912881121cb26fad7c38c17ba7daa18764771836b34fab7d3fbd93ed633878"
 "checksum clap 2.27.1 (registry+https://github.com/rust-lang/crates.io-index)" = "1b8c532887f1a292d17de05ae858a8fe50a301e196f9ef0ddb7ccd0d1d00f180"
 "checksum cloudabi 0.0.3 (registry+https://github.com/rust-lang/crates.io-index)" = "ddfc5b9aa5d4507acaf872de71051dfd0e309860e88966e1051e462a077aac4f"
+"checksum crossbeam-channel 0.3.9 (registry+https://github.com/rust-lang/crates.io-index)" = "c8ec7fcd21571dc78f96cc96243cab8d8f035247c3efd16c687be154c3fa9efa"
 "checksum crossbeam-utils 0.6.5 (registry+https://github.com/rust-lang/crates.io-index)" = "f8306fcef4a7b563b76b7dd949ca48f52bc1141aa067d2ea09565f3e2652aa5c"
 "checksum ena 0.13.0 (registry+https://github.com/rust-lang/crates.io-index)" = "3dc01d68e08ca384955a3aeba9217102ca1aa85b6e168639bf27739f1d749d87"
 "checksum getrandom 0.1.6 (registry+https://github.com/rust-lang/crates.io-index)" = "e65cce4e5084b14874c4e7097f38cab54f47ee554f9194673456ea379dcc4c55"

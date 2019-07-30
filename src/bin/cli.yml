@@ -1,12 +1,18 @@
 name: rchc
 version: "1.0"
 author: Timothée Haudebourg <timothee.haudebourg@irisa.fr>
-about: A regular CHC solver
+about: Regular CHC solver
 args:
   - INPUT:
       help: Input SMT2-lib file.
       index: 1
   - verbose:
+      long: verbose
       short: v
       multiple: true
       help: Sets the level of verbosity.
+  - learn-fast:
+      long: learn-fast
+      help: Stop the teacher as soon as a learning sample has been found, and pass
+        it directly to the learner. If not set, the teacher will continue until
+        a learning sample has been found for every falsifiable clause.

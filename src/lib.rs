@@ -8,6 +8,7 @@ extern crate smt2;
 extern crate terms;
 extern crate tree_automata as ta;
 extern crate automatic_relations as automatic;
+extern crate crossbeam_channel;
 
 pub(crate) mod utils;
 mod error;

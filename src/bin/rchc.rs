@@ -37,8 +37,7 @@ fn main() {
 
 	let solver = load_smt_solver();
 
-	let teacher = rchc::teacher::Explorer::<aligned::Convolution>::new();
-
+	let teacher = rchc::teacher::Explorer::<aligned::Convolution>::new(read_teacher_options(&matches));
 	let learner = match rchc::learner::SMTLearner::<_, _, _, aligned::Convolution>::new(solver) {
 		Ok(learner) => learner,
 		Err(e) => {
@@ -87,6 +86,19 @@ fn load_smt_solver() -> smt2::Client<&'static str, smt2::client::cvc4::Constant,
 			std::process::exit(1)
 		}
 	}
+}
+
+fn read_teacher_options(matches: &clap::ArgMatches) -> rchc::teacher::Options {
+	let mut options = rchc::teacher::Options::default();
+	options.learn_fast = matches.is_present("learn-fast");
+	if let Some(value) = matches.value_of("max-states") {
+		if let Ok(value) = usize::from_str_radix(value.as_ref(), 10) {
+			options.max_states = value;
+		} else {
+			warn!("option ignored: invalid integer `{}`", value)
+		}
+	}
+	options
 }
 
 fn load_asset(env: &mut rchc::Environment, name: &str) {

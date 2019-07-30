@@ -9,12 +9,13 @@ use std::fmt;
 use terms::Term;
 use ta::Rank;
 use automatic::Convoluted;
+use crate::ConvolutedSort;
 
 pub mod smt;
 pub use smt::SMTLearner;
 
 /// Learning sample.
-pub struct Sample<P, F>(pub P, pub Term<Rank<Convoluted<F>>>);
+pub struct Sample<P, F>(pub P, pub bool, pub Term<Rank<Convoluted<F>>>);
 
 /// Learning constraints.
 pub enum Constraint<F, P> {
@@ -45,7 +46,7 @@ pub trait Learner<F, P, T> {
     type Error: fmt::Display;
 
     /// Declare a new predicate to learn.
-    fn declare_predicate(&mut self, p: P) -> Result<(), Self::Error>;
+    fn declare_predicate(&mut self, p: P, domain: ConvolutedSort) -> Result<(), Self::Error>;
 
     /// Add a learning constraint.
     fn add(&mut self, new_constraint: Constraint<F, P>) -> Result<(), Self::Error>;
