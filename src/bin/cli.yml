@@ -16,3 +16,10 @@ args:
       help: Stop the teacher as soon as a learning sample has been found, and pass
         it directly to the learner. If not set, the teacher will continue until
         a learning sample has been found for every falsifiable clause.
+  - max-states:
+      long: max-states
+      short: m
+      help: Set the upper limit on the number of states in the created automatic
+        relations. If there is no model where all predicates state count is below
+        this limit, then the solver will return `unknown`.
+      takes_value: true
