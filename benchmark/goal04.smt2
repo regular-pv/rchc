@@ -1,10 +1,10 @@
 (set-logic HORN)
 
-(declare-fun |incorrect| ( ) Bool)
-(declare-fun |count| ( Int (List Int) Int ) Bool)
+(declare-fun incorrect ( ) Bool)
+(declare-fun count ( Nat (List Nat) Nat ) Bool)
 
 (assert
-  (forall ( (A Int) (B (List Int)) (C Int) ) 
+  (forall ( (A Nat) (B (List Nat)) (C Nat) )
     (=>
       (and
         (and (= C 0) (= B nil))
@@ -14,7 +14,7 @@
   )
 )
 (assert
-  (forall ( (A (List Int)) (B Int) (C Int) (D (List Int)) (E Int) ) 
+  (forall ( (A (List Nat)) (B Nat) (C Nat) (D (List Nat)) (E Nat) )
     (=>
       (and
         (count C A B)
@@ -25,7 +25,7 @@
   )
 )
 (assert
-  (forall ( (A Int) (B (List Int)) (C Int) (D (List Int)) (E Int) ) 
+  (forall ( (A Nat) (B (List Nat)) (C Nat) (D (List Nat)) (E Nat) )
     (=>
       (and
         (count C B E)
@@ -36,7 +36,7 @@
   )
 )
 (assert
-  (forall ( (A (List Int)) (B Int) (C Int) (D (List Int)) (E Int) ) 
+  (forall ( (A (List Nat)) (B Nat) (C Nat) (D (List Nat)) (E Nat) )
     (=>
       (and
         (count C D E)
@@ -48,7 +48,7 @@
   )
 )
 (assert
-  (forall ( (CHC_COMP_UNUSED Bool) ) 
+  (forall ( (CHC_COMP_UNUSED Bool) )
     (=>
       (and
         incorrect

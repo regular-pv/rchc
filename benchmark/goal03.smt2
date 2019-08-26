@@ -1,11 +1,10 @@
 (set-logic HORN)
 
-(declare-fun |incorrect| ( ) Bool)
-(declare-fun |count| ( Int (List Int) Int ) Bool)
-(declare-fun |append| ( (List Int) (List Int) (List Int) ) Bool)
+(declare-fun count ( Nat (List Nat) Nat ) Bool)
+(declare-fun append ( (List Nat) (List Nat) (List Nat) ) Bool)
 
 (assert
-  (forall ( (A (List Int)) (B (List Int)) (v_2 (List Int)) ) 
+  (forall ( (A (List Nat)) (B (List Nat)) (v_2 (List Nat)) )
     (=>
       (and
         (and (= A nil) (= v_2 B))
@@ -15,7 +14,7 @@
   )
 )
 (assert
-  (forall ( (A Int) (B (List Int)) (C (List Int)) (D (List Int)) (E (List Int)) (F (List Int)) ) 
+  (forall ( (A Nat) (B (List Nat)) (C (List Nat)) (D (List Nat)) (E (List Nat)) (F (List Nat)) )
     (=>
       (and
         (append B E C)
@@ -26,7 +25,7 @@
   )
 )
 (assert
-  (forall ( (A Int) (B (List Int)) (C Int) ) 
+  (forall ( (A Nat) (B (List Nat)) (C Nat) )
     (=>
       (and
         (and (= B nil) (= C 0))
@@ -36,18 +35,18 @@
   )
 )
 (assert
-  (forall ( (A (List Int)) (B Int) (C Int) (D (List Int)) (E Int) ) 
+  (forall ( (A (List Nat)) (B Nat) (C Nat) (D (List Nat)) (E Nat) )
     (=>
       (and
         (count C A B)
-        (and (= D (insert C A)) (>= B 0) (= E (+ 1 B)))
+        (and (= D (insert C A)) (>= B 0) (= E (s B)))
       )
       (count C D E)
     )
   )
 )
 (assert
-  (forall ( (A Int) (B (List Int)) (C Int) (D (List Int)) (E Int) ) 
+  (forall ( (A Nat) (B (List Nat)) (C Nat) (D (List Nat)) (E Nat) )
     (=>
       (and
         (count C B E)
@@ -58,26 +57,14 @@
   )
 )
 (assert
-  (forall ( (A (List Int)) (B (List Int)) (C Int) (D Int) (E (List Int)) (F Int) ) 
-    (=>
+  (forall ( (A (List Nat)) (B (List Nat)) (C Nat) (D Nat) (E (List Nat)) (F Nat) )
+    (not
       (and
         (count D E F)
         (append B A E)
         (count D B C)
-        (and (>= C (+ 1 F)) (>= F 0) (>= C 0))
+        (and (>= C (s F)) (>= F 0) (>= C 0))
       )
-      incorrect
-    )
-  )
-)
-(assert
-  (forall ( (CHC_COMP_UNUSED Bool) ) 
-    (=>
-      (and
-        incorrect
-        true
-      )
-      false
     )
   )
 )
