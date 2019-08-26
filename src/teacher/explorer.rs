@@ -6,7 +6,6 @@ use std::cell::Cell;
 use std::marker::PhantomData;
 use const_vec::ConstVec;
 use once_cell::unsync::OnceCell;
-use rand::prelude::*;
 use rand::seq::SliceRandom;
 use terms::{
     Pattern,
@@ -389,9 +388,10 @@ impl<C: Convolution<F>> Teacher<GroundSort<Arc<Sort>>, F, P, Relation<F, Q, C>> 
 
         let mut head_automata = Vec::with_capacity(self.clauses.len());
 
+        let (sender, receiver) = crossbeam_channel::bounded(self.clauses.len());
+
         let learning_constraints = crossbeam_utils::thread::scope(|scope| {
             let mut threads = Vec::with_capacity(self.clauses.len());
-            let (sender, receiver) = crossbeam_channel::bounded(self.clauses.len());
             let (kill_sender, kill_receiver) = crossbeam_channel::bounded(self.clauses.len());
 
             let mut rng = rand::thread_rng();
@@ -523,7 +523,7 @@ impl<C: Convolution<F>> Teacher<GroundSort<Arc<Sort>>, F, P, Relation<F, Q, C>> 
                         // } else {
                         //     println!("empty");
                         // }
-                        thread_sender.send((terms, k));
+                        thread_sender.send((terms, k)).unwrap();
                         //terms
                     }
                     //None
@@ -541,7 +541,7 @@ impl<C: Convolution<F>> Teacher<GroundSort<Arc<Sort>>, F, P, Relation<F, Q, C>> 
                             learning_constraints.push(self.generate_learning_constraint(convoluted_terms, i));
                             if self.options.learn_fast {
                                 for _ in &self.clauses {
-                                    kill_sender.send(()); // kill them all!
+                                    kill_sender.send(()).unwrap(); // kill them all!
                                 }
                             }
                             break

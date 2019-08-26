@@ -20,8 +20,7 @@ use std::rc::Rc;
 use utf8_decode::{Decoder, UnsafeDecoder};
 use source_span::{
 	Position,
-	lazy::Buffer,
-	fmt::*
+	lazy::Buffer
 };
 use smt2::syntax::Parsable;
 use automatic::convolution::aligned;

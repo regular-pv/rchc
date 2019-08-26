@@ -3,7 +3,6 @@ use std::hash::{Hash, Hasher};
 use std::rc::Rc;
 use std::cell::UnsafeCell;
 use std::sync::{Arc, RwLock};
-use std::borrow::Borrow;
 use std::fmt;
 
 use smt2::{Typed, GroundSort, TypeChecker, TypeRef, GroundTypeRef};
@@ -299,7 +298,6 @@ impl Predicate {
     }
 
     fn typecheck(&self, checker: &mut TypeChecker<Arc<Sort>>, env: &Environment, args: &[TypeRef<Arc<Sort>>], return_sort: TypeRef<Arc<Sort>>) {
-        use smt2::TypeCheckError::*;
         for (i, arg) in args.iter().enumerate() {
             checker.assert_equal(self.args[i].clone(), arg.clone())
         }
@@ -521,7 +519,6 @@ impl smt2::Environment for Environment {
     }
 
     fn typecheck_function(&self, checker: &mut TypeChecker<Arc<Sort>>, f: &Function, args: &[TypeRef<Arc<Sort>>], return_sort: TypeRef<Arc<Sort>>) {
-        use smt2::TypeCheckError::*;
         match f {
             Function::Eq => {
                 for (i, arg) in args.iter().enumerate() {
@@ -548,7 +545,7 @@ impl smt2::Environment for Environment {
                 let cons = &def.constructors[*n];
 
                 let mut parameters = Vec::new();
-                for p in &def.parameters {
+                for _ in &def.parameters {
                     parameters.push(checker.new_type_variable(checker.location()))
                 }
 

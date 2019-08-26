@@ -108,7 +108,6 @@ impl<'a> Node<TypedConstructor, &'a ta::alternating::Clause<u32, Convoluted<u32>
                         }).collect();
                         context_size += arity;
 
-                        let sort = function_args[k].0.sort.clone();
                         let pattern = smt2::Pattern::Cons {
                             constructor: Function::Constructor(f.sort.sort.clone(), f.n),
                             args: new_variables.iter().map(|(_, _, id)| {
