@@ -10,13 +10,13 @@ stderrlog = "*"
 clap = { version = "~2.27.0", features = ["yaml"] }
 rand = "*"
 utf8-decode = "*"
-source-span = { path = "/home/timothee/documents/projects/hemisemi/utils/parsing/source-span" }
-const-vec = { path = "/home/timothee/documents/projects/hemisemi/utils/data-structures/const-vec" }
+source-span = "*"
+const-vec = "*"
 once_cell = "*"
-smt2 = { path = "../smt2" }
-terms = { path = "../../../timbuk-rs/terms" }
-tree-automata = { path = "../../../timbuk-rs/tree-automata" }
-automatic-relations = { path = "../../../timbuk-rs/automatic-relations" }
+smt2 = "*"
+terms = "*"
+tree-automata = "*"
+automatic-relations = "*"
 crossbeam-channel = "*"
 crossbeam-utils = "*"
 rust-embed = "*"
