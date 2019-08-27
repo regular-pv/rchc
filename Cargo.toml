@@ -1,6 +1,6 @@
 [package]
 name = "rchc"
-version = "0.1.0"
+version = "1.0.0"
 authors = ["Timothée Haudebourg <timothee.haudebourg@irisa.fr>"]
 edition = "2018"
 
