@@ -352,13 +352,9 @@ impl<C: Convolution<F>> Teacher<GroundSort<Arc<Sort>>, F, P, Relation<F, Q, C>> 
 	fn check<'a>(&mut self, model: &'a Self::Model) -> std::result::Result<Result<F, P>, Error> {
 		// println!("NEW CHECK");
 
-		let mut automata: Vec<&'a Automaton<Rank<Convoluted<F>>, Q, NoLabel>> = Vec::with_capacity(self.predicates.len());
-
-		for _ in 0..self.predicates.len() {
-			unsafe {
-				automata.push(std::mem::uninitialized());
-			}
-		}
+		let dummy_automaton = Automaton::new();
+		let mut automata: Vec<&Automaton<Rank<Convoluted<F>>, Q, NoLabel>> = Vec::with_capacity(self.predicates.len());
+		automata.resize(self.predicates.len(), &dummy_automaton);
 
 		let mut state_count = 0;
 		for (p, aut) in model.iter() {
