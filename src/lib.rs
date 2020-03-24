@@ -25,5 +25,5 @@ pub use learner::{Learner, Model};
 pub use engine::Engine;
 
 // pub trait SortedWith<S> {
-//     fn sort(&self) -> &S;
+//	 fn sort(&self) -> &S;
 // }

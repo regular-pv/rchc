@@ -26,13 +26,13 @@ use smt2::syntax::Parsable;
 use automatic::convolution::aligned;
 
 fn main() {
-    // Parse options.
+	// Parse options.
 	let yaml = load_yaml!("cli.yml");
-    let matches = clap::App::from_yaml(yaml).get_matches();
+	let matches = clap::App::from_yaml(yaml).get_matches();
 
-    // Init logger.
+	// Init logger.
 	let verbosity = matches.occurrences_of("verbose") as usize;
-    stderrlog::new().verbosity(verbosity).init().unwrap();
+	stderrlog::new().verbosity(verbosity).init().unwrap();
 
 	let solver = load_smt_solver();
 
@@ -50,24 +50,24 @@ fn main() {
 
 	load_asset(&mut env, "default.smt2");
 
-    // Choose the input.
-    let stdin = std::io::stdin();
-    match matches.value_of("INPUT") {
-        Some(filename) => {
-            info!("reading file: `{}'.", filename);
-            match std::fs::File::open(filename) {
-                Ok(file) => process_input(&mut env, filename, file),
-                Err(e) => {
-                    error!("unable to open file `{}': {}", filename, e);
-                    std::process::exit(1)
-                }
-            }
-        },
-        None => {
-            info!("reading standard input.");
-            process_input(&mut env, "stdin".to_string(), stdin.lock())
-        }
-    }
+	// Choose the input.
+	let stdin = std::io::stdin();
+	match matches.value_of("INPUT") {
+		Some(filename) => {
+			info!("reading file: `{}'.", filename);
+			match std::fs::File::open(filename) {
+				Ok(file) => process_input(&mut env, filename, file),
+				Err(e) => {
+					error!("unable to open file `{}': {}", filename, e);
+					std::process::exit(1)
+				}
+			}
+		},
+		None => {
+			info!("reading standard input.");
+			process_input(&mut env, "stdin".to_string(), stdin.lock())
+		}
+	}
 }
 
 fn load_smt_solver() -> smt2::Client<&'static str, smt2::client::cvc4::Constant, rchc::learner::smt::Sort, rchc::learner::smt::Function<Rc<rchc::Predicate>>> {
