@@ -14,6 +14,7 @@ pub enum Predicate<S: Clone + PartialEq, P: Clone> {
 	User(P, bool)
 }
 
+#[derive(Clone)]
 pub enum Expr<S: Clone + PartialEq, F: Clone, P: Clone> {
 	True,
 	False,

@@ -206,6 +206,7 @@ pub enum Function {
 	And,
 	Or,
 	Implies,
+	Equiv,
 	Predicate(Rc<Predicate>),
 	Constructor(Arc<Sort>, usize),
 	State(Rc<Predicate>, u32, u32)
@@ -220,6 +221,7 @@ impl fmt::Display for Function {
 			And => write!(f, "and"),
 			Or => write!(f, "or"),
 			Implies => write!(f, "=>"),
+			Equiv => write!(f, "<=>"),
 			Predicate(p) => write!(f, "{}", p),
 			Constructor(sort, n) => {
 				let guard = sort.def.read().unwrap();
@@ -245,6 +247,7 @@ impl smt2::Function<Environment> for Function {
 			Function::Not => (1, 1),
 			Function::And | Function::Or => (1, std::usize::MAX),
 			Function::Implies => (2, 2),
+			Function::Equiv => (2, 2),
 			Function::Predicate(p) => p.arity(env),
 			Function::Constructor(sort, n) => {
 				let def = sort.def.read().unwrap();
@@ -382,6 +385,7 @@ impl Environment {
 		functions.insert("and".to_string(), Function::And);
 		functions.insert("or".to_string(), Function::Or);
 		functions.insert("=>".to_string(), Function::Implies);
+		functions.insert("<=>".to_string(), Function::Equiv);
 		functions.insert("true".to_string(), Function::Constructor(sort_bool.clone(), 0));
 		functions.insert("false".to_string(), Function::Constructor(sort_bool.clone(), 1));
 
@@ -532,7 +536,7 @@ impl smt2::Environment for Environment {
 				checker.assert_equal(self.sort_bool(), args[0].clone());
 				checker.assert_equal(self.sort_bool(), return_sort);
 			},
-			Function::And | Function::Or | Function::Implies => {
+			Function::And | Function::Or | Function::Implies | Function::Equiv => {
 				for arg in args.iter() {
 					checker.assert_equal(self.sort_bool(), arg.clone());
 				}
@@ -631,6 +635,13 @@ impl smt2::Server for Environment {
 						let body = self.decode_body(&args[0])?;
 						let head = self.decode_expr(&args[1])?;
 						self.register_clause(Clause::new(body, head))?;
+						Ok(())
+					},
+					Apply { fun: Function::Equiv, args, .. } => {
+						let a = self.decode_expr(&args[0])?;
+						let b = self.decode_expr(&args[1])?;
+						self.register_clause(Clause::new(vec![a.clone()], b.clone()))?;
+						self.register_clause(Clause::new(vec![b], a))?;
 						Ok(())
 					},
 					Apply { fun: Function::Not, args, .. } => {
