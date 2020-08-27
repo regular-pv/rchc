@@ -26,14 +26,14 @@ impl Default for Options {
 }
 
 /// Teacher check results.
-pub enum Result<F, P> {
+pub enum Result<F: fmt::Debug, P: fmt::Debug> {
 	Sat,
 	Unsat(Vec<Constraint<F, P>>),
 	Unknown
 }
 
 /// Teacher trait.
-pub trait Teacher<S: Clone + PartialEq, F: Clone, P: Clone, T> {
+pub trait Teacher<S: Clone + PartialEq, F: Clone + fmt::Debug, P: Clone + fmt::Debug, T> {
 	type Model: Model<P, T>;
 	type Error: fmt::Display;
 

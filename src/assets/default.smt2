@@ -1,3 +1,9 @@
+(declare-datatypes ( (AB 0) )
+  (
+    ( (a) (b) )
+  )
+)
+
 (declare-datatypes ( (Nat 0) )
   (
     ( (0) (s (predecessor Nat)) )

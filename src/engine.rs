@@ -32,7 +32,7 @@ pub trait ToInstance<F: Symbol> {
 	fn to_instance(&self) -> Instance<F>;
 }
 
-pub trait Abstract<S: Clone + PartialEq, F: Symbol, P: Clone> {
+pub trait Abstract<S: Clone + PartialEq, F: Symbol + fmt::Debug, P: Clone + fmt::Debug> {
 	/// Declare a new predicate to solve.
 	fn declare_predicate(&mut self, p: P, domain: ConvolutedSort) -> std::result::Result<(), Error>;
 
@@ -49,7 +49,7 @@ pub trait Abstract<S: Clone + PartialEq, F: Symbol, P: Clone> {
 	fn produce_model(&self) -> Option<HashMap<P, Instance<F>>>;
 }
 
-pub struct Engine<S: Clone + PartialEq, F: Symbol, P: Clone, I, L, T, M> where M: Model<P, I>, L: Learner<F, P, I, Model=M>, T: Teacher<S, F, P, I, Model=M> {
+pub struct Engine<S: Clone + PartialEq, F: Symbol + fmt::Debug, P: Clone + fmt::Debug, I, L, T, M> where M: Model<P, I>, L: Learner<F, P, I, Model=M>, T: Teacher<S, F, P, I, Model=M> {
 	learner: L,
 	teacher: T,
 	predicates: Vec<P>,
@@ -60,7 +60,7 @@ pub struct Engine<S: Clone + PartialEq, F: Symbol, P: Clone, I, L, T, M> where M
 	_m: PhantomData<M>
 }
 
-impl<S: Clone + PartialEq, F: Symbol, P: Clone, I, L, T, M> Engine<S, F, P, I, L, T, M> where M: Model<P, I>, L: Learner<F, P, I, Model=M>, T: Teacher<S, F, P, I, Model=M> {
+impl<S: Clone + PartialEq, F: Symbol + fmt::Debug, P: Clone + fmt::Debug, I, L, T, M> Engine<S, F, P, I, L, T, M> where M: Model<P, I>, L: Learner<F, P, I, Model=M>, T: Teacher<S, F, P, I, Model=M> {
 	pub fn new(learner: L, teacher: T) -> Engine<S, F, P, I, L, T, M> {
 		Engine {
 			learner: learner,
@@ -95,7 +95,7 @@ impl<S: Clone + PartialEq, F: Symbol, P: Clone, I, L, T, M> Engine<S, F, P, I, L
 	}
 }
 
-impl<S: Clone + PartialEq, F: Symbol, P: Clone + Eq + Hash + fmt::Display, I: ToInstance<F>, L, T, M> Abstract<S, F, P> for Engine<S, F, P, I, L, T, M> where M: Model<P, I>, L: Learner<F, P, I, Model=M>, T: Teacher<S, F, P, I, Model=M>, P: fmt::Display, I: fmt::Display {
+impl<S: Clone + PartialEq, F: Symbol + fmt::Debug, P: Clone + Eq + Hash + fmt::Display + fmt::Debug, I: ToInstance<F>, L, T, M> Abstract<S, F, P> for Engine<S, F, P, I, L, T, M> where M: Model<P, I>, L: Learner<F, P, I, Model=M>, T: Teacher<S, F, P, I, Model=M>, P: fmt::Display, I: fmt::Display {
 	/// Declare a new predicate to solve.
 	fn declare_predicate(&mut self, p: P, domain: ConvolutedSort) -> std::result::Result<(), Error> {
 		debug!("engine: declare new predicate `{}`", p);

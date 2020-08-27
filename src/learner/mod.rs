@@ -17,6 +17,12 @@ pub use smt::SMTLearner;
 /// Learning sample.
 pub struct Sample<P, F>(pub P, pub bool, pub Term<Rank<Convoluted<F>>>);
 
+impl<F: fmt::Display, P: fmt::Debug> fmt::Debug for Sample<P, F> {
+	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+		write!(f, "({:?}, {})", self.0, self.2)
+	}
+}
+
 /// Learning constraints.
 pub enum Constraint<F, P> {
 	/// A positive example where the given sample should evaluate to True.
@@ -30,6 +36,16 @@ pub enum Constraint<F, P> {
 	Implication(Vec<Sample<P, F>>, Sample<P, F>)
 }
 
+impl<F: fmt::Display, P: fmt::Debug> fmt::Debug for Constraint<F, P> {
+	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+		match self {
+			Constraint::Positive(sample) => write!(f, "positive: {:?}", sample),
+			Constraint::Negative(samples) => write!(f, "negative: {:?}", samples),
+			Constraint::Implication(samples, s) => write!(f, "implication: {:?} => {:?}", samples, s)
+		}
+	}
+}
+
 pub trait Model<P, T> {
 	fn get(&self, p: &P) -> &T;
 }
@@ -41,7 +57,7 @@ impl<P: Eq + Hash, T> Model<P, T> for HashMap<P, T> {
 }
 
 /// Learner trait.
-pub trait Learner<F, P, T> {
+pub trait Learner<F: fmt::Debug, P: fmt::Debug, T> {
 	type Model: Model<P, T>;
 	type Error: fmt::Display;
 

@@ -141,14 +141,43 @@ pub enum Expr {
 	Apply(Predicate, Convoluted<Pattern<F, usize>>)
 }
 
+impl fmt::Debug for Expr {
+	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+		match self {
+			Expr::True => write!(f, "true"),
+			Expr::False => write!(f, "false"),
+			Expr::Apply(p, pattern) => {
+				write!(f, "{:?}({})", p, pattern)
+			}
+		}
+	}
+}
+
 pub enum Predicate {
 	Primitive(usize, bool),
 	User(P, usize, bool)
 }
 
+impl fmt::Debug for Predicate {
+	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+		match self {
+			Predicate::Primitive(i, true) => write!(f, "p{}", i),
+			Predicate::Primitive(i, false) => write!(f, "!p{}", i),
+			Predicate::User(_, i, true) => write!(f, "u{}", i),
+			Predicate::User(_, i, false) => write!(f, "!u{}", i)
+		}
+	}
+}
+
 pub struct Clause {
 	body: Vec<Expr>,
 	head: Expr
+}
+
+impl fmt::Debug for Clause {
+	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+		write!(f, "{:?} => {:?}", self.body, self.head)
+	}
 }
 
 impl<C: Convolution<F>> Explorer<C> {
@@ -331,6 +360,8 @@ impl<C: Convolution<F>> Teacher<GroundSort<Arc<Sort>>, F, P, Relation<F, Q, C>> 
 
 	/// Add a new clause to the solver.
 	fn assert(&mut self, clause: crate::clause::Clause<GroundSort<Arc<Sort>>, F, P>) -> std::result::Result<(), Error> {
+		debug!("add clause: {:?}", clause);
+
 		let mut body = Vec::with_capacity(clause.body.len());
 		for e in clause.body {
 			body.push(self.compile_clause_expr(e));
@@ -338,10 +369,13 @@ impl<C: Convolution<F>> Teacher<GroundSort<Arc<Sort>>, F, P, Relation<F, Q, C>> 
 
 		let head = self.compile_clause_expr(clause.head);
 
-		self.clauses.push(Clause {
+		let compiled_clause = Clause {
 			body: body,
 			head: head
-		});
+		};
+
+		debug!("compiled clause: {:?}", compiled_clause);
+		self.clauses.push(compiled_clause);
 
 		Ok(())
 	}
@@ -422,9 +456,9 @@ impl<C: Convolution<F>> Teacher<GroundSort<Arc<Sort>>, F, P, Relation<F, Q, C>> 
 					},
 					Expr::Apply(Predicate::Primitive(p, positive), _) => {
 						if *positive {
-							head_automaton = &self.primitives[*p].automaton;
-						} else {
 							head_automaton = self.primitives[*p].complement();
+						} else {
+							head_automaton = &self.primitives[*p].automaton;
 						}
 					}
 				}
@@ -515,9 +549,9 @@ impl<C: Convolution<F>> Teacher<GroundSort<Arc<Sort>>, F, P, Relation<F, Q, C>> 
 					{
 						let terms = C::search(&clause_automata, searchable_patterns, thread_kill).next();
 						// if let Some(terms) = &terms {
-						//	 println!("found {}", crate::utils::PList(&terms, ","));
+						// 	 println!("found {}", crate::utils::PList(&terms, ","));
 						// } else {
-						//	 println!("empty");
+						// 	 println!("empty");
 						// }
 						thread_sender.send((terms, k)).unwrap();
 						//terms

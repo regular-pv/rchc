@@ -1,3 +1,4 @@
+use std::fmt;
 use terms::Pattern;
 
 #[derive(Clone, PartialEq)]
@@ -6,12 +7,42 @@ pub enum Primitive<S: Clone + PartialEq> {
 	Eq(S, usize)
 }
 
+impl<S: Clone + PartialEq> fmt::Display for Primitive<S> {
+	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+		match self {
+			Primitive::Eq(_, _) => write!(f, "=")
+		}
+	}
+}
+
+impl<S: Clone + PartialEq> fmt::Debug for Primitive<S> {
+	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+		match self {
+			Primitive::Eq(_, _) => write!(f, "=")
+		}
+	}
+}
+
 #[derive(Clone)]
+/// Predicate
+///
+/// The bool in each constructor indicates if it is positive (true) or negative (false).
 pub enum Predicate<S: Clone + PartialEq, P: Clone> {
 	Primitive(Primitive<S>, bool),
 
 	// User-defined predicate
 	User(P, bool)
+}
+
+impl<S: Clone + PartialEq, P: Clone + fmt::Debug> fmt::Debug for Predicate<S, P> {
+	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+		match self {
+			Predicate::Primitive(p, true) => write!(f, "{}", p),
+			Predicate::Primitive(p, false) => write!(f, "!{}", p),
+			Predicate::User(p, true) => write!(f, "{:?}", p),
+			Predicate::User(p, false) => write!(f, "!{:?}", p)
+		}
+	}
 }
 
 #[derive(Clone)]
@@ -20,6 +51,29 @@ pub enum Expr<S: Clone + PartialEq, F: Clone, P: Clone> {
 	False,
 	Var(usize),
 	Apply(Predicate<S, P>, Vec<Pattern<F, usize>>)
+}
+
+impl<S: Clone + PartialEq, F: Clone + fmt::Display, P: Clone + fmt::Debug> fmt::Debug for Expr<S, F, P> {
+	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+		match self {
+			Expr::True => write!(f, "true"),
+			Expr::False => write!(f, "false"),
+			Expr::Var(n) => write!(f, "x{}", n),
+			Expr::Apply(p, patterns) => {
+				write!(f, "{:?}(", p)?;
+				let mut first = true;
+				for pattern in patterns {
+					if !first {
+						write!(f, ", {}", pattern)?;
+					} else {
+						write!(f, "{}", pattern)?;
+						first = false;
+					}
+				}
+				write!(f, ")")
+			}
+		}
+	}
 }
 
 impl<S: Clone + PartialEq, F: Clone, P: Clone> Expr<S, F, P> {
@@ -131,4 +185,10 @@ impl<S: Clone + PartialEq, F: Clone, P: Clone> Clause<S, F, P> {
 	// pub fn align(&self) -> simplified::Clause<F, P> {
 	//	 panic!("TODO align")
 	// }
+}
+
+impl<S: Clone + PartialEq, F: Clone + fmt::Display, P: Clone + fmt::Debug> fmt::Debug for Clause<S, F, P> {
+	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+		write!(f, "{:?} => {:?}", self.body, self.head)
+	}
 }

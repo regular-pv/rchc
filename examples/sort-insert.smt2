@@ -1,4 +1,5 @@
 (set-logic HORN)
+; find the insert-sort function predicate and check that it preserves the length of the list.
 
 (declare-datatypes ( (List 1) )
   (

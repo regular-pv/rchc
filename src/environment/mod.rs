@@ -328,6 +328,12 @@ impl fmt::Display for Predicate {
 	}
 }
 
+impl fmt::Debug for Predicate {
+	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+		write!(f, "{}", self.id)
+	}
+}
+
 impl smt2::Function<Environment> for Predicate {
 	fn arity(&self, _env: &Environment) -> (usize, usize) {
 		(self.args.len(), self.args.len())
