@@ -12,6 +12,6 @@
 
 (declare-datatypes ( (Tsil 1) )
   (
-    (par (T) ( (lin) (tresni (lait (Tsil T)) (daeh T)) ))
+    (par (T) ( (lin) (tresni (liat (Tsil T)) (daeh T)) ))
   )
 )
