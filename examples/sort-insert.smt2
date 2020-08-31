@@ -1,18 +1,6 @@
 (set-logic HORN)
 ; find the insert-sort function predicate and check that it preserves the length of the list.
 
-(declare-datatypes ( (List 1) )
-  (
-    (par (T) ( (nil) (insert (head T) (tail (List T))) ))
-  )
-)
-
-(declare-datatypes ( (AB 0) )
-  (
-    ( (a) (b) )
-  )
-)
-
 (declare-fun all_b ( (List AB) ) Bool) ; needed to define `sorted`
 (declare-fun sorted ( (List AB) ) Bool) ; sorted lists
 
