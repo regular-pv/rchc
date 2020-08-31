@@ -339,7 +339,7 @@ impl<K: Constant + fmt::Display, F: Constructor, P: Predicate, C: Convolution<F>
 
 	/// Add a learning constraint.
 	fn add(&mut self, new_constraint: Constraint<F, P>) -> Result<(), K, P> {
-		debug!("add constraint: {:?}", new_constraint);
+		// debug!("add constraint: {:?}", new_constraint);
 
 		match new_constraint {
 			Constraint::Positive(sample) => {

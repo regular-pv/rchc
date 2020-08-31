@@ -9,7 +9,8 @@ use once_cell::unsync::OnceCell;
 use rand::seq::SliceRandom;
 use terms::{
 	Pattern,
-	Var
+	Var,
+	variable::Parented
 };
 use ta::{
 	Symbol,
@@ -524,12 +525,17 @@ impl<C: Convolution<F>> Teacher<GroundSort<Arc<Sort>>, F, P, Relation<F, Q, C>> 
 
 				let thread_sender = sender.clone();
 				let thread_kill = kill_receiver.clone();
+
+				if k == 1 {
+					trace!("clause: {:?}", clause)
+				}
+
 				let handle = scope.spawn(move |_| {
 					// Make the variable Spawnable.
 					let namespace: Cell<usize> = Cell::new(0);
 					let namespace_ref = &namespace;
 
-					let searchable_patterns: Vec<Convoluted<Pattern<TypedConstructor, Var<usize>>>> = patterns.into_iter().map(|pattern| {
+					let searchable_patterns: Vec<Convoluted<Pattern<TypedConstructor, Parented<Var<usize>>>>> = patterns.into_iter().map(|pattern| {
 						Convoluted(pattern.0.into_iter().map(|conv_pattern| {
 							if let MaybeBottom::Some(conv_pattern) = conv_pattern {
 								MaybeBottom::Some(conv_pattern.map_variables(&mut |x| {
@@ -538,7 +544,7 @@ impl<C: Convolution<F>> Teacher<GroundSort<Arc<Sort>>, F, P, Relation<F, Q, C>> 
 										namespace_ref.set(*x)
 									}
 
-									Pattern::var(Var::from(*x, &namespace_ref))
+									Pattern::var(Var::from(*x, &namespace_ref).into())
 								}))
 							} else {
 								MaybeBottom::Bottom
@@ -547,12 +553,24 @@ impl<C: Convolution<F>> Teacher<GroundSort<Arc<Sort>>, F, P, Relation<F, Q, C>> 
 					}).collect();
 
 					{
-						let terms = C::search(&clause_automata, searchable_patterns, thread_kill).next();
+						let terms = C::search(&clause_automata, searchable_patterns.clone(), Some(thread_kill)).next();
 						// if let Some(terms) = &terms {
 						// 	 println!("found {}", crate::utils::PList(&terms, ","));
 						// } else {
 						// 	 println!("empty");
 						// }
+
+						if k == 1 {
+							match &terms {
+								Some(Ok(convoluted_terms)) => trace!("found sample: {}", crate::utils::PList(convoluted_terms, ", ")),
+								_ => {
+									trace!("automata:\n{}", crate::utils::PList(&clause_automata, "\n\n"));
+									trace!("patterns:\n{}", crate::utils::PList(&searchable_patterns, ", "));
+									trace!("no sample.")
+								}
+							}
+						}
+
 						thread_sender.send((terms, k)).unwrap();
 						//terms
 					}
