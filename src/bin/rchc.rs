@@ -108,19 +108,19 @@ fn load_asset(env: &mut rchc::Environment, name: &str) {
 	let start = Position::default();
 	let decoder = Decoder::new(data.iter().cloned());
 	let buffer = SourceBuffer::new(decoder, start, DEFAULT_METRICS);
-	process_buffer(env, name, buffer, start)
+	process_buffer(env, name, buffer, start, &DEFAULT_METRICS)
 }
 
 /// Process a given SMT2-lib input.
 fn process_input<Input: Read, F: std::fmt::Display + Clone>(env: &mut rchc::Environment, file: F, input: Input) {
 	let start = Position::default();
 	let decoder = UnsafeDecoder::new(input.bytes());
-	let buffer = SourceBuffer::new(decoder, start);
-	process_buffer(env, file, buffer, start)
+	let buffer = SourceBuffer::new(decoder, start, DEFAULT_METRICS);
+	process_buffer(env, file, buffer, start, &DEFAULT_METRICS)
 }
 
-fn process_buffer<I: Iterator<Item = std::io::Result<char>>, F: std::fmt::Display + Clone, M: Metrics>(env: &mut rchc::Environment, file: F, buffer: SourceBuffer<std::io::Error, I, M>, start: Position) {
-	let mut lexer = smt2::Lexer::new(buffer.iter(), start).peekable();
+fn process_buffer<I: Iterator<Item = std::io::Result<char>>, F: std::fmt::Display + Clone, M: Metrics + Clone>(env: &mut rchc::Environment, file: F, buffer: SourceBuffer<std::io::Error, I, M>, start: Position, metrics: &M) {
+	let mut lexer = smt2::Lexer::new(buffer.iter(), start, metrics.clone()).peekable();
 
 	// read command until end of file.
 	while let Some(_) = lexer.peek() {
@@ -132,21 +132,21 @@ fn process_buffer<I: Iterator<Item = std::io::Result<char>>, F: std::fmt::Displa
 							Ok(()) => (),
 							Err(e) => {
 								let viewport = phrase.span().aligned();
-								smt2::error::Infos::print_at(&e, file, &buffer, viewport, phrase.span());
+								smt2::error::Infos::print_at(&e, file, &buffer, viewport, phrase.span(), metrics).unwrap();
 								std::process::exit(1)
 							}
 						}
 					},
 					Err(e) => {
 						let viewport = phrase.span().aligned();
-						smt2::error::Infos::print(e, file, &buffer, viewport);
+						smt2::error::Infos::print(e, file, &buffer, viewport, metrics).unwrap();
 						std::process::exit(1)
 					}
 				}
 			},
 			Err(e) => {
 				let viewport = e.span().aligned().inter(buffer.span());
-				smt2::error::Infos::print(e, file, &buffer, viewport);
+				smt2::error::Infos::print(e, file, &buffer, viewport, metrics).unwrap();
 				std::process::exit(1)
 			}
 		}
