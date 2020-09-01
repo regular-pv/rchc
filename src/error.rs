@@ -17,7 +17,6 @@ pub enum Error {
 
 pub enum InvalidAssertionReason {
 	AssertForallBody,
-	AssertNotBody,
 	Expr,
 	ExprNot,
 	Pattern
@@ -52,9 +51,6 @@ impl smt2::error::Informative for Error {
 				match reason {
 					AssertForallBody => {
 						i.add(*span, Some("the `forall` construct can only contain an implication, a negation or a conjunction of predicate application".to_string()))
-					},
-					AssertNotBody => {
-						i.add(*span, Some("the `not` construct can only contain a predicate application".to_string()))
 					},
 					Expr => {
 						i.add(*span, Some("this must be a predicate or primitive application".to_string()))

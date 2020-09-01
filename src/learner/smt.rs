@@ -18,8 +18,6 @@ use crate::teacher::explorer::Relation;
 
 use super::{Learner, Constraint, Sample};
 
-pub trait Predicate = Clone + Eq + Hash + fmt::Display + fmt::Debug;
-
 pub type Result<T, K, P> = std::result::Result<T, Error<K, P>>;
 
 pub enum Error<K: Clone + PartialEq, P: Predicate> {
@@ -114,8 +112,6 @@ pub struct SMTLearner<K: Clone + PartialEq, F: Symbol, P: Predicate, C: Convolut
 	predicate_ids: HashMap<P, u32>,
 	c: PhantomData<C>
 }
-
-pub trait Constructor = Symbol + Eq + Hash + SortedWith<GroundSort<Arc<crate::Sort>>> + fmt::Debug;
 
 /// States of the abstract automaton.
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
@@ -440,3 +436,6 @@ impl<K: Constant + fmt::Display, F: Constructor, P: Predicate, C: Convolution<F>
 		}
 	}
 }
+
+pub trait Predicate = Clone + Eq + Hash + fmt::Display + fmt::Debug;
+pub trait Constructor = Symbol + Eq + Hash + SortedWith<GroundSort<Arc<crate::Sort>>> + fmt::Debug;

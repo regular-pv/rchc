@@ -670,7 +670,12 @@ impl smt2::Server for Environment {
 						self.register_clause(Clause::new(body, clause::Expr::False))?;
 						Ok(())
 					},
-					_ => Err(Error::InvalidAssertion(args[0].span(), error::InvalidAssertionReason::AssertNotBody))
+					_ => {
+						let body = self.decode_body(&args[0])?;
+						let head = clause::Expr::False;
+						self.register_clause(Clause::new(body, head))?;
+						Ok(())
+					}
 				}
 			},
 			_ => {

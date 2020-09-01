@@ -20,7 +20,9 @@ use std::rc::Rc;
 use utf8_decode::{Decoder, UnsafeDecoder};
 use source_span::{
 	Position,
-	lazy::Buffer
+	SourceBuffer,
+	Metrics,
+	DEFAULT_METRICS
 };
 use smt2::syntax::Parsable;
 use automatic::convolution::aligned;
@@ -71,6 +73,7 @@ fn main() {
 }
 
 fn load_smt_solver() -> smt2::Client<&'static str, smt2::client::cvc4::Constant, rchc::learner::smt::Sort, rchc::learner::smt::Function<Rc<rchc::Predicate>>> {
+	// cvc4 --incremental --finite-model-find --produce-model --lang=smtlib2.6 --output-lang=smtlib2.6
 	let mut solver_cmd = std::process::Command::new("cvc4");
 	solver_cmd.args(&["--incremental", "--finite-model-find", "--produce-model", "--lang=smtlib2.6", "--output-lang=smtlib2.6"]);
 	match smt2::Client::<_, smt2::client::cvc4::Constant, _, _>::new(
@@ -104,7 +107,7 @@ fn load_asset(env: &mut rchc::Environment, name: &str) {
 	let data = Asset::get(name).unwrap();
 	let start = Position::default();
 	let decoder = Decoder::new(data.iter().cloned());
-	let buffer = Buffer::new(decoder, start);
+	let buffer = SourceBuffer::new(decoder, start, DEFAULT_METRICS);
 	process_buffer(env, name, buffer, start)
 }
 
@@ -112,11 +115,11 @@ fn load_asset(env: &mut rchc::Environment, name: &str) {
 fn process_input<Input: Read, F: std::fmt::Display + Clone>(env: &mut rchc::Environment, file: F, input: Input) {
 	let start = Position::default();
 	let decoder = UnsafeDecoder::new(input.bytes());
-	let buffer = Buffer::new(decoder, start);
+	let buffer = SourceBuffer::new(decoder, start);
 	process_buffer(env, file, buffer, start)
 }
 
-fn process_buffer<I: Iterator<Item = std::io::Result<char>>, F: std::fmt::Display + Clone>(env: &mut rchc::Environment, file: F, buffer: Buffer<I>, start: Position) {
+fn process_buffer<I: Iterator<Item = std::io::Result<char>>, F: std::fmt::Display + Clone, M: Metrics>(env: &mut rchc::Environment, file: F, buffer: SourceBuffer<std::io::Error, I, M>, start: Position) {
 	let mut lexer = smt2::Lexer::new(buffer.iter(), start).peekable();
 
 	// read command until end of file.
