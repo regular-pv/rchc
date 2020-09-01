@@ -8,12 +8,6 @@ extern crate source_span;
 extern crate smt2;
 extern crate rchc;
 extern crate automatic_relations as automatic;
-#[macro_use]
-extern crate rust_embed;
-
-#[derive(RustEmbed)]
-#[folder = "src/assets"]
-struct Asset;
 
 use std::io::Read;
 use std::rc::Rc;
@@ -50,7 +44,7 @@ fn main() {
 	let engine = rchc::Engine::new(learner, teacher);
 	let mut env = rchc::Environment::new(engine);
 
-	load_asset(&mut env, "default.smt2");
+	load_asset(&mut env, "builtin", include_bytes!("builtin.smt2"));
 
 	// Choose the input.
 	let stdin = std::io::stdin();
@@ -103,8 +97,7 @@ fn read_teacher_options(matches: &clap::ArgMatches) -> rchc::teacher::Options {
 	options
 }
 
-fn load_asset(env: &mut rchc::Environment, name: &str) {
-	let data = Asset::get(name).unwrap();
+fn load_asset(env: &mut rchc::Environment, name: &str, data: &[u8]) {
 	let start = Position::default();
 	let decoder = Decoder::new(data.iter().cloned());
 	let buffer = SourceBuffer::new(decoder, start, DEFAULT_METRICS);
