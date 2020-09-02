@@ -5,11 +5,11 @@
 (declare-fun odd ( Nat ) Bool)
 
 (assert
-  (forall ( (x Nat) ) (=> (even x) (odd (s x))) )
+  (forall ( (x Nat) ) (<=> (even x) (odd (s x))) )
 )
 
 (assert
-  (forall ( (x Nat) ) (=> (odd x) (even (s x))) )
+  (forall ( (x Nat) ) (<=> (odd x) (even (s x))) )
 )
 
 (assert
