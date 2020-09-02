@@ -202,6 +202,7 @@ impl fmt::Debug for Sort {
 #[derive(Clone, PartialEq, Eq)]
 pub enum Function {
 	Eq,
+	Neq,
 	Not,
 	And,
 	Or,
@@ -218,6 +219,7 @@ impl fmt::Display for Function {
 		use self::Function::*;
 		match self {
 			Eq => write!(f, "="),
+			Neq => write!(f, "!="),
 			Not => write!(f, "not"),
 			And => write!(f, "and"),
 			Or => write!(f, "or"),
@@ -246,6 +248,7 @@ impl smt2::Function<Environment> for Function {
 	fn arity(&self, env: &Environment) -> (usize, usize) {
 		match self {
 			Function::Eq => (1, std::usize::MAX),
+			Function::Neq => (1, std::usize::MAX),
 			Function::Not => (1, 1),
 			Function::And | Function::Or => (1, std::usize::MAX),
 			Function::Implies => (2, 2),
@@ -390,6 +393,7 @@ impl Environment {
 		// pre-defined functions.
 		let mut functions = HashMap::new();
 		functions.insert("=".to_string(), Function::Eq);
+		functions.insert("!=".to_string(), Function::Neq);
 		functions.insert("not".to_string(), Function::Not);
 		functions.insert("and".to_string(), Function::And);
 		functions.insert("or".to_string(), Function::Or);
@@ -490,6 +494,13 @@ impl Environment {
 				}
 				Ok(clause::Expr::Apply(clause::Predicate::Primitive(clause::Primitive::Eq(args[0].sort().clone(), args.len()), true), patterns))
 			},
+			smt2::Term::Apply { fun: Function::Neq, args, .. } => {
+				let mut patterns = Vec::with_capacity(args.len());
+				for arg in args.iter() {
+					patterns.push(self.decode_pattern(arg)?)
+				}
+				Ok(clause::Expr::Apply(clause::Predicate::Primitive(clause::Primitive::Eq(args[0].sort().clone(), args.len()), false), patterns))
+			},
 			smt2::Term::Var { index, .. } => {
 				Ok(clause::Expr::Var(*index))
 			},
@@ -546,7 +557,7 @@ impl smt2::Environment for Environment {
 
 	fn typecheck_function(&self, checker: &mut TypeChecker<Arc<Sort>>, f: &Function, args: &[TypeRef<Arc<Sort>>], return_sort: TypeRef<Arc<Sort>>) {
 		match f {
-			Function::Eq => {
+			Function::Eq | Function::Neq => {
 				for (i, arg) in args.iter().enumerate() {
 					if i > 0 {
 						checker.assert_equal(args[0].clone(), arg.clone());
