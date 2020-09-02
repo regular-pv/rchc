@@ -23,7 +23,3 @@ pub use environment::*;
 pub use teacher::Teacher;
 pub use learner::{Learner, Model};
 pub use engine::Engine;
-
-// pub trait SortedWith<S> {
-//	 fn sort(&self) -> &S;
-// }
