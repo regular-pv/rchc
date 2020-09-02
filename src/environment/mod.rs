@@ -206,6 +206,7 @@ pub enum Function {
 	And,
 	Or,
 	Implies,
+	ImpliedBy,
 	Equiv,
 	Predicate(Rc<Predicate>),
 	Constructor(Arc<Sort>, usize),
@@ -221,6 +222,7 @@ impl fmt::Display for Function {
 			And => write!(f, "and"),
 			Or => write!(f, "or"),
 			Implies => write!(f, "=>"),
+			ImpliedBy => write!(f, "<="),
 			Equiv => write!(f, "<=>"),
 			Predicate(p) => write!(f, "{}", p),
 			Constructor(sort, n) => {
@@ -247,6 +249,7 @@ impl smt2::Function<Environment> for Function {
 			Function::Not => (1, 1),
 			Function::And | Function::Or => (1, std::usize::MAX),
 			Function::Implies => (2, 2),
+			Function::ImpliedBy => (2, 2),
 			Function::Equiv => (2, 2),
 			Function::Predicate(p) => p.arity(env),
 			Function::Constructor(sort, n) => {
@@ -391,6 +394,7 @@ impl Environment {
 		functions.insert("and".to_string(), Function::And);
 		functions.insert("or".to_string(), Function::Or);
 		functions.insert("=>".to_string(), Function::Implies);
+		functions.insert("<=".to_string(), Function::ImpliedBy);
 		functions.insert("<=>".to_string(), Function::Equiv);
 		functions.insert("true".to_string(), Function::Constructor(sort_bool.clone(), 0));
 		functions.insert("false".to_string(), Function::Constructor(sort_bool.clone(), 1));
@@ -426,6 +430,18 @@ impl Environment {
 
 	pub fn register_clause(&mut self, clause: Clause<GroundSort<Arc<Sort>>, TypedConstructor, Rc<Predicate>>) -> Result<()> {
 		Ok(self.engine.assert(clause)?)
+	}
+
+	pub fn negate_expr(&self, e: &clause::Expr<GroundSort<Arc<Sort>>, TypedConstructor, Rc<Predicate>>) -> clause::Expr<GroundSort<Arc<Sort>>, TypedConstructor, Rc<Predicate>> {
+		match e {
+			clause::Expr::True => clause::Expr::False,
+			clause::Expr::False => clause::Expr::True,
+			clause::Expr::Var(_) => panic!("TODO"),
+			clause::Expr::Apply(clause::Predicate::Primitive(p, positive), patterns) =>
+				clause::Expr::Apply(clause::Predicate::Primitive(p.clone(), !positive), patterns.clone()),
+			clause::Expr::Apply(clause::Predicate::User(p, positive), patterns) =>
+				clause::Expr::Apply(clause::Predicate::User(p.clone(), !positive), patterns.clone())
+		}
 	}
 
 	pub fn decode_body(&self, term: &Typed<Term>) -> Result<Vec<clause::Expr<GroundSort<Arc<Sort>>, TypedConstructor, Rc<Predicate>>>> {
@@ -542,7 +558,7 @@ impl smt2::Environment for Environment {
 				checker.assert_equal(self.sort_bool(), args[0].clone());
 				checker.assert_equal(self.sort_bool(), return_sort);
 			},
-			Function::And | Function::Or | Function::Implies | Function::Equiv => {
+			Function::And | Function::Or | Function::Implies | Function::ImpliedBy | Function::Equiv => {
 				for arg in args.iter() {
 					checker.assert_equal(self.sort_bool(), arg.clone());
 				}
@@ -643,12 +659,46 @@ impl smt2::Server for Environment {
 						self.register_clause(Clause::new(body, head))?;
 						Ok(())
 					},
-					Apply { fun: Function::Equiv, args, .. } => {
-						let a = self.decode_expr(&args[0])?;
-						let b = self.decode_expr(&args[1])?;
-						self.register_clause(Clause::new(vec![a.clone()], b.clone()))?;
-						self.register_clause(Clause::new(vec![b], a))?;
+					Apply { fun: Function::ImpliedBy, args, .. } => {
+						let head = self.decode_expr(&args[0])?;
+						let body = self.decode_body(&args[1])?;
+						self.register_clause(Clause::new(body, head))?;
 						Ok(())
+					},
+					Apply { fun: Function::Equiv, args, .. } => {
+						let a = self.decode_expr(&args[0]);
+						let b = self.decode_expr(&args[1]);
+
+						match (a, b) {
+							(Ok(a), Ok(b)) => {
+								self.register_clause(Clause::new(vec![a.clone()], b.clone()))?;
+								self.register_clause(Clause::new(vec![b], a))?;
+								Ok(())
+							},
+							(Ok(a), Err(_)) => {
+								let b = self.decode_body(&args[1])?;
+								let not_a = self.negate_expr(&a);
+								for e in &b {
+									let not_e = self.negate_expr(e);
+									self.register_clause(Clause::new(vec![not_e], not_a.clone()))?;
+								}
+								self.register_clause(Clause::new(b, a))?;
+								Ok(())
+							},
+							(Err(_), Ok(b)) => {
+								let a = self.decode_body(&args[0])?;
+								let not_b = self.negate_expr(&b);
+								for e in &a {
+									let not_e = self.negate_expr(e);
+									self.register_clause(Clause::new(vec![not_e], not_b.clone()))?;
+								}
+								self.register_clause(Clause::new(a, b))?;
+								Ok(())
+							},
+							_ => {
+								Err(Error::InvalidAssertion(term.span(), error::InvalidAssertionReason::InvalidEquiv(args[0].span(), args[1].span())))
+							}
+						}
 					},
 					Apply { fun: Function::Not, args, .. } => {
 						let body = self.decode_body(&args[0])?;

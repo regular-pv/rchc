@@ -51,7 +51,6 @@ pub enum Function<P: Predicate> {
 	And,
 	Or,
 	Implies,
-	Equiv,
 	Ite,
 	Q(ConvolutedSort, u32),
 	Predicate(P)
@@ -67,7 +66,6 @@ impl<P: Predicate + fmt::Display> fmt::Display for Function<P> {
 			Function::And => write!(f, "and"),
 			Function::Or => write!(f, "or"),
 			Function::Implies => write!(f, "=>"),
-			Function::Equiv => write!(f, "<=>"),
 			Function::Ite => write!(f, "ite"),
 			Function::Q(sort, i) => write!(f, "q{}:{}", i, sort),
 			Function::Predicate(p) => write!(f, "p{}", p)
@@ -158,7 +156,6 @@ impl<K: Constant + fmt::Display, F: Constructor, P: Predicate, C: Convolution<F>
 		solver.predefined_fun("and", Function::And, FunctionSignature::LogicNary)?;
 		solver.predefined_fun("or", Function::Or, FunctionSignature::LogicNary)?;
 		solver.predefined_fun("=>", Function::Implies, FunctionSignature::LogicBinary)?;
-		solver.predefined_fun("<=>", Function::Equiv, FunctionSignature::LogicBinary)?;
 		solver.predefined_fun("ite", Function::Ite, FunctionSignature::Ite)?;
 		Ok(SMTLearner {
 			predicates: Vec::new(),

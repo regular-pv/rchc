@@ -1,135 +1,67 @@
 (set-logic HORN)
-; find the insert-sort function predicate and check that it preserves the length of the list.
+; over-approximate the insert-sort function
+; and check that it preserves the length of the list.
 
-(declare-fun leq ( AB AB ) Bool)
+(declare-fun leq ( AB AB ) Bool) ; exact
 
 (assert (leq a a))
 (assert (leq a b))
 (assert (not (leq b a)))
 (assert (leq b b))
 
-(declare-fun sorted ( (List AB) ) Bool)
-
-(assert
-	(sorted nil)
-)
-(assert
-	(forall ((x AB)) (sorted (insert x nil)))
-)
-(assert
-	(forall ( (x AB) (y AB) (l (List AB)) ) (=> (and (leq x y) (sorted (insert y l))) (sorted (insert x (insert y l)))) )
-)
-
-; (declare-fun sorted ( (List AB) ) Bool) ; sorted lists
+; (declare-fun sorted ( (List AB) ) Bool) ; exact
 ;
-; (declare-fun sort_insert ( AB (List AB) (List AB) ) Bool) ; insert function
-; (declare-fun sort ( (List AB) (List AB) ) Bool) ;	sort function
-;
-; (declare-fun len_eq ( (List AB) (List AB) ) Bool) ; check list length equality
-;
-; (assert
-; 	(forall ( (l (List AB)) ) (=> (sorted l) (sorted (insert a l)) ) )
-; )
-; (assert
-; 	(forall ( (l (List AB)) ) (=> (all_b l) (sorted (insert b l)) ) )
-; )
 ; (assert
 ; 	(sorted nil)
 ; )
 ; (assert
-; 	(forall ( (l (List AB)) ) (not (sorted (insert b (insert a l)))))
+; 	(forall ((x AB)) (sorted (insert x nil)))
 ; )
-;
 ; (assert
-; 	(forall ((X AB)) (sort_insert X nil (insert X nil)))
+; 	(forall ( (x AB) (y AB) (l (List AB)) ) (<=> (and (leq x y) (sorted (insert y l))) (sorted (insert x (insert y l)))) )
 ; )
-;
+
+(declare-fun sort_insert ( AB (List AB) (List AB) ) Bool) ; over-approx
+
+(assert
+	(forall ((x AB)) (sort_insert x nil (insert x nil)))
+)
+(assert
+	(forall ((x AB) (y AB) (l (List AB))) (=> (leq x y) (sort_insert x (insert y l) (insert x (insert y l)))))
+)
+(assert
+	(forall ((x AB) (y AB) (l (List AB)) (l2 (List AB))) (=> (and (not (leq x y)) (sort_insert x l l2)) (sort_insert x (insert y l) (insert y l2))))
+)
+
+(declare-fun sort ((List AB) (List AB)) Bool) ; over-approx
+
+(assert
+	(sort nil nil)
+)
+(assert
+	(forall ((x AB) (l (List AB)) (l2 (List AB)) (l3 (List AB))) (=> (and (sort l l2) (sort_insert x l2 l3)) (sort (insert x l) l3)))
+)
+
+(declare-fun len_eq ( (List AB) (List AB) ) Bool) ; exact
+
+(assert
+	(len_eq nil nil)
+)
+(assert
+	(forall ((x AB) (y AB) (l1 (List AB)) (l2 (List AB))) (<=> (len_eq l1 l2) (len_eq (insert x l1) (insert y l2))))
+)
+
+;; properties to verify
+
+; sort sorts.
 ; (assert
-; 	(forall ((X AB) (L (List AB))) (sort_insert X (insert b L) (insert X (insert b L))))
+; 	(forall ((l (List AB)) (l2 (List AB))) (=> (sort l l2) (sorted l2)))
 ; )
-;
-; (assert
-; 	(forall ((L (List AB))) (sort_insert a (insert a L) (insert a (insert a L))))
-; )
-;
-; (assert
-; 	(forall ((L (List AB)) (M (List AB)))
-; 		(=>
-; 			(sort_insert b L M)
-; 			(sort_insert b (insert a L) (insert a M))
-; 		)
-; 	)
-; )
-;
-; (assert
-; 	(sort nil nil)
-; )
-;
-; (assert
-; 	(forall ((X AB) (L (List AB)) (M (List AB)) (S (List AB)))
-; 		(=>
-; 			(and
-; 				(sort L M)
-; 				(sort_insert X M S)
-; 			)
-; 			(sort (insert X L) S)
-; 		)
-; 	)
-; )
-;
-; (assert
-; 	(forall ((L (List AB)) (S (List AB)))
-; 		(not
-; 			(and
-; 				(sort L S)
-; 				(not (sorted S))
-; 			)
-; 		)
-; 	)
-; )
-;
-; (assert
-; 	(len_eq nil nil)
-; )
-;
-; (assert
-; 	(forall ((X AB) (Y AB) (L (List AB)) (M (List AB)))
-; 		(=>
-; 			(len_eq L M)
-; 			(len_eq (insert X L) (insert Y M))
-; 		)
-; 	)
-; )
-;
-; (assert
-; 	(forall ((X AB) (L (List AB)))
-; 		(not (len_eq nil (insert X L)))
-; 	)
-; )
-;
-; (assert
-; 	(forall ((X AB) (L (List AB)))
-; 		(not (len_eq (insert X L) nil))
-; 	)
-; )
-;
-; (assert
-; 	(forall ((X AB) (Y AB) (L (List AB)) (M (List AB)))
-; 		(=>
-; 			(not (len_eq L M))
-; 			(not (len_eq (insert X L) (insert Y M)))
-; 		)
-; 	)
-; )
-;
-; (assert
-; 	(forall ((X AB) (L (List AB)) (M (List AB)) (S (List AB)))
-; 		(=>
-; 			(sort L M)
-; 			(len_eq L M)
-; 		)
-; 	)
-; )
+
+; sort preserves len
+(assert
+	(forall ((l (List AB)) (l2 (List AB))) (=> (sort l l2) (len_eq l l2)))
+)
 
 (check-sat)
 (get-model)

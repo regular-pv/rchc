@@ -19,7 +19,8 @@ pub enum InvalidAssertionReason {
 	AssertForallBody,
 	Expr,
 	ExprNot,
-	Pattern
+	Pattern,
+	InvalidEquiv(Span, Span)
 }
 
 impl From<crate::engine::Error> for Error {
@@ -60,6 +61,11 @@ impl smt2::error::Informative for Error {
 					},
 					Pattern => {
 						i.add(*span, Some("this must be a pattern".to_string()))
+					},
+					InvalidEquiv(span_a, span_b) => {
+						i.add(*span_a, Some("either this should be a predicate application...".to_string()));
+						i.add(*span_b, Some("...or this".to_string()));
+						i.add_note("\x1b[1mnote:\x1b[m the equivalence operator `<=>` expects a simple predicate application on one side".to_string())
 					}
 				}
 			},
