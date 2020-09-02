@@ -108,6 +108,7 @@ pub struct SMTLearner<K: Clone + PartialEq, F: Symbol, P: Predicate, C: Convolut
 	namespace: Namespace,
 	const_sort: smt2::GroundSort<Sort>,
 	predicate_ids: HashMap<P, u32>,
+	unsat: bool,
 	c: PhantomData<C>
 }
 
@@ -163,6 +164,7 @@ impl<K: Constant + fmt::Display, F: Constructor, P: Predicate, C: Convolution<F>
 			solver: solver,
 			const_sort: const_sort,
 			predicate_ids: HashMap::new(),
+			unsat: false,
 			c: PhantomData
 		})
 	}
@@ -361,75 +363,86 @@ impl<K: Constant + fmt::Display, F: Constructor, P: Predicate, C: Convolution<F>
 				let rhs_pos = rhs.1;
 				let rhs_state = self.add_sample(rhs)?;
 				self.assert_implication(&lhs_states, (rhs_p, rhs_pos, rhs_state))
+			},
+			Constraint::False => {
+				self.unsat = true;
+				Ok(())
 			}
 		}
 	}
 
 	/// Produce a model that respects all the constraints given to the learner.
 	fn produce_model(&mut self) -> Result<Option<Self::Model>, K, P> {
-		match self.solver.check_sat()? {
-			smt2::response::CheckSat::Sat => {
-				let smt_model = self.solver.get_model()?;
-				let mut model = HashMap::new();
+		if self.unsat {
+			Ok(None)
+		} else {
+			match self.solver.check_sat()? {
+				smt2::response::CheckSat::Sat => {
+					let smt_model = self.solver.get_model()?;
+					let mut model = HashMap::new();
 
-				let mut table = HashMap::new();
-				let mut predicates_defs: Vec<(P, Typed<smt2::Term<Solver<K, P>>>)> = Vec::new();
+					let mut table = HashMap::new();
+					let mut predicates_defs: Vec<(P, Typed<smt2::Term<Solver<K, P>>>)> = Vec::new();
 
-				for mut def in smt_model.definitions.into_iter() {
-					def.bodies.reverse();
-					for decl in def.declarations.into_iter() {
-						let body = def.bodies.pop().unwrap();
-						match decl.f {
-							Function::Q(_, i) => {
-								match body.into_inner() {
-									smt2::Term::Const(Sorted(c, _)) => {
-										table.insert(i, c.index());
-									},
-									_ => panic!("unexpected state definition!")
-								}
-							},
-							Function::Predicate(p) => {
-								predicates_defs.push((p.clone(), body));
-							},
-							_ => ()
-						}
-					}
-				}
-
-				for (p, body) in &predicates_defs {
-					let i = self.predicate_id(p) as usize;
-					let data = &self.predicates[i];
-					let abs_aut = &data.automaton;
-					// println!("-----------");
-					// println!("abs_aut: {}", abs_aut);
-					//let mut final_states = HashSet::new();
-					let mut aut = abs_aut.map_states(|AbsQ(sort, k)| {
-						Q::Alive(sort.clone(), *table.get(k).unwrap())
-					});
-
-					let mut final_states = HashSet::new();
-					for q in aut.states() {
-						if let Q::Alive(sort, k) = q {
-							if *sort == data.domain && Self::is_final_state(*k, body) {
-								final_states.insert(q.clone());
+					for mut def in smt_model.definitions.into_iter() {
+						def.bodies.reverse();
+						for decl in def.declarations.into_iter() {
+							let body = def.bodies.pop().unwrap();
+							match decl.f {
+								Function::Q(_, i) => {
+									match body.into_inner() {
+										smt2::Term::Const(Sorted(c, _)) => {
+											table.insert(i, c.index());
+										},
+										_ => panic!("unexpected state definition!")
+									}
+								},
+								Function::Predicate(p) => {
+									predicates_defs.push((p.clone(), body));
+								},
+								_ => ()
 							}
 						}
 					}
 
-					for q in final_states.into_iter() {
-						aut.set_final(q);
+					for (p, body) in &predicates_defs {
+						let i = self.predicate_id(p) as usize;
+						let data = &self.predicates[i];
+						let abs_aut = &data.automaton;
+						// println!("-----------");
+						// println!("abs_aut: {}", abs_aut);
+						//let mut final_states = HashSet::new();
+						let mut aut = abs_aut.map_states(|AbsQ(sort, k)| {
+							Q::Alive(sort.clone(), *table.get(k).unwrap())
+						});
+
+						let mut final_states = HashSet::new();
+						for q in aut.states() {
+							if let Q::Alive(sort, k) = q {
+								if *sort == data.domain && Self::is_final_state(*k, body) {
+									final_states.insert(q.clone());
+								}
+							}
+						}
+
+						for q in final_states.into_iter() {
+							aut.set_final(q);
+						}
+
+						// println!("aut: {}", aut);
+						// println!("-----------");
+
+						model.insert(p.clone(), Relation(aut, PhantomData));
 					}
 
-					// println!("aut: {}", aut);
-					// println!("-----------");
-
-					model.insert(p.clone(), Relation(aut, PhantomData));
-				}
-
-				Ok(Some(model))
-			},
-			smt2::response::CheckSat::Unsat => Ok(None),
-			smt2::response::CheckSat::Unknown => Err(Error::Unknown)
+					Ok(Some(model))
+				},
+				smt2::response::CheckSat::Unsat => {
+					self.unsat = true;
+					Ok(None)
+				},
+				smt2::response::CheckSat::Unknown => Err(Error::Unknown)
+			}
 		}
 	}
 }

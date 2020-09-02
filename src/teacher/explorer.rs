@@ -269,7 +269,8 @@ impl<C: Convolution<F>> Explorer<C> {
 					Constraint::Positive(Sample(p.clone(), *positive, sample))
 				},
 				Expr::Apply(_, _) => {
-					panic!("found a positive example for a primitive!")
+					warn!("found a positive example for a primitive");
+					Constraint::False
 				},
 				_ => unreachable!()
 			}

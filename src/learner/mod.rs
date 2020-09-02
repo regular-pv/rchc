@@ -33,7 +33,11 @@ pub enum Constraint<F, P> {
 
 	/// An implication constraint where if all the left hand side samples evaluate to True,
 	/// then so should the right hand side sample.
-	Implication(Vec<Sample<P, F>>, Sample<P, F>)
+	Implication(Vec<Sample<P, F>>, Sample<P, F>),
+
+	/// A never satisfiable constraint.
+	/// Issued when the teacher has detected a non solvable constraint system.
+	False
 }
 
 impl<F: fmt::Display, P: fmt::Debug> fmt::Debug for Constraint<F, P> {
@@ -41,7 +45,8 @@ impl<F: fmt::Display, P: fmt::Debug> fmt::Debug for Constraint<F, P> {
 		match self {
 			Constraint::Positive(sample) => write!(f, "positive: {:?}", sample),
 			Constraint::Negative(samples) => write!(f, "negative: {:?}", samples),
-			Constraint::Implication(samples, s) => write!(f, "implication: {:?} => {:?}", samples, s)
+			Constraint::Implication(samples, s) => write!(f, "implication: {:?} => {:?}", samples, s),
+			Constraint::False => write!(f, "false")
 		}
 	}
 }
