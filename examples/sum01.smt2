@@ -9,4 +9,3 @@
 (assert (forall ((x Nat) (y Nat)) (not (+ x (s y) x))))
 
 (check-sat)
-(get-model)

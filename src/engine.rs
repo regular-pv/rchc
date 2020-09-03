@@ -2,6 +2,10 @@ use std::marker::PhantomData;
 use std::fmt;
 use std::collections::HashMap;
 use std::hash::Hash;
+use std::time::{
+	Instant,
+	Duration
+};
 use automatic::Convoluted;
 use ta::Symbol;
 use crate::{Learner, Teacher, Model, clause::Clause, ConvolutedSort};
@@ -47,11 +51,17 @@ pub trait Abstract<S: Clone + PartialEq, F: Symbol + fmt::Debug, P: Clone + fmt:
 
 	/// Produce model.
 	fn produce_model(&self) -> Option<HashMap<P, Instance<F>>>;
+
+	fn learning_duration(&self) -> Duration;
+
+	fn teaching_duration(&self) -> Duration;
 }
 
 pub struct Engine<S: Clone + PartialEq, F: Symbol + fmt::Debug, P: Clone + fmt::Debug, I, L, T, M> where M: Model<P, I>, L: Learner<F, P, I, Model=M>, T: Teacher<S, F, P, I, Model=M> {
 	learner: L,
+	learner_time: Duration,
 	teacher: T,
+	teacher_time: Duration,
 	predicates: Vec<P>,
 	model: Option<L::Model>,
 	_s: PhantomData<S>,
@@ -64,7 +74,9 @@ impl<S: Clone + PartialEq, F: Symbol + fmt::Debug, P: Clone + fmt::Debug, I, L, 
 	pub fn new(learner: L, teacher: T) -> Engine<S, F, P, I, L, T, M> {
 		Engine {
 			learner: learner,
+			learner_time: Duration::default(),
 			teacher: teacher,
+			teacher_time: Duration::default(),
 			predicates: Vec::new(),
 			model: None,
 			_s: PhantomData,
@@ -111,12 +123,18 @@ impl<S: Clone + PartialEq, F: Symbol + fmt::Debug, P: Clone + Eq + Hash + fmt::D
 	/// Find the next model and check it.
 	fn check(&mut self) -> std::result::Result<Option<Result<F, P>>, Error> {
 		info!("model search...");
+		let t = Instant::now();
 		self.model = Self::learner_result(self.learner.produce_model())?;
+		self.learner_time += t.elapsed();
+
 		match &self.model {
 			Some(model) => {
 				info!("model found.");
 				info!("checking...");
-				Ok(Some(Self::teacher_result(self.teacher.check(model))?))
+				let t = Instant::now();
+				let result = Self::teacher_result(self.teacher.check(model))?;
+				self.teacher_time += t.elapsed();
+				Ok(Some(result))
 			},
 			None => {
 				info!("no model found.");
@@ -141,5 +159,13 @@ impl<S: Clone + PartialEq, F: Symbol + fmt::Debug, P: Clone + Eq + Hash + fmt::D
 		} else {
 			None
 		}
+	}
+
+	fn learning_duration(&self) -> Duration {
+		self.learner_time
+	}
+
+	fn teaching_duration(&self) -> Duration {
+		self.teacher_time
 	}
 }

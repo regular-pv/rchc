@@ -42,4 +42,3 @@
 (assert (forall ((n Nat) (l (Tsil Nat))) (=> (make_list n l) (length l n))))
 
 (check-sat)
-(get-model)

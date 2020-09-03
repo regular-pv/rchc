@@ -23,3 +23,7 @@ args:
         relations. If there is no model where all predicates state count is below
         this limit, then the solver will return `unknown`.
       takes_value: true
+  - benchmark:
+      long: benchmark
+      short: b
+      help: Print time performances statistics before the `check-sat` command result as comment.

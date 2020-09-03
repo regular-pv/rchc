@@ -376,6 +376,9 @@ pub struct Environment {
 
 	/// Engine.
 	engine: Box<dyn engine::Abstract<GroundSort<Arc<Sort>>, TypedConstructor, Rc<Predicate>>>,
+
+	/// When set, benchmark info will be printed before the `check-sat` command output.
+	print_benchmark: bool
 }
 
 impl Environment {
@@ -410,13 +413,18 @@ impl Environment {
 				parameters: Vec::new()
 			},
 			functions: functions,
-			engine: Box::new(engine)
+			engine: Box::new(engine),
+			print_benchmark: false
 		};
 
 		// define Bool.
 		env.register_sort(sort_bool);
 
 		env
+	}
+
+	pub fn enable_benchmark(&mut self) {
+		self.print_benchmark = true
 	}
 
 	pub fn true_fun(&self) -> Function {
@@ -436,7 +444,7 @@ impl Environment {
 		Ok(self.engine.assert(clause)?)
 	}
 
-	pub fn negate_expr(&self, e: &clause::Expr<GroundSort<Arc<Sort>>, TypedConstructor, Rc<Predicate>>) -> clause::Expr<GroundSort<Arc<Sort>>, TypedConstructor, Rc<Predicate>> {
+	fn negate_expr(&self, e: &clause::Expr<GroundSort<Arc<Sort>>, TypedConstructor, Rc<Predicate>>) -> clause::Expr<GroundSort<Arc<Sort>>, TypedConstructor, Rc<Predicate>> {
 		match e {
 			clause::Expr::True => clause::Expr::False,
 			clause::Expr::False => clause::Expr::True,
@@ -448,7 +456,7 @@ impl Environment {
 		}
 	}
 
-	pub fn decode_body(&self, term: &Typed<Term>) -> Result<Vec<clause::Expr<GroundSort<Arc<Sort>>, TypedConstructor, Rc<Predicate>>>> {
+	fn decode_body(&self, term: &Typed<Term>) -> Result<Vec<clause::Expr<GroundSort<Arc<Sort>>, TypedConstructor, Rc<Predicate>>>> {
 		match term.as_ref() {
 			smt2::Term::Apply { fun: Function::And, args, .. } => {
 				let mut conjuncts = Vec::with_capacity(args.len());
@@ -467,7 +475,7 @@ impl Environment {
 		}
 	}
 
-	pub fn decode_expr(&self, term: &Typed<Term>) -> Result<clause::Expr<GroundSort<Arc<Sort>>, TypedConstructor, Rc<Predicate>>> {
+	fn decode_expr(&self, term: &Typed<Term>) -> Result<clause::Expr<GroundSort<Arc<Sort>>, TypedConstructor, Rc<Predicate>>> {
 		match term.as_ref() {
 			smt2::Term::Apply { fun: Function::Not, args, .. } => {
 				match self.decode_expr(&args[0])? {
@@ -508,7 +516,7 @@ impl Environment {
 		}
 	}
 
-	pub fn decode_pattern(&self, term: &Typed<Term>) -> Result<Pattern<TypedConstructor, usize>> {
+	fn decode_pattern(&self, term: &Typed<Term>) -> Result<Pattern<TypedConstructor, usize>> {
 		match term.as_ref() {
 			smt2::Term::Var { index, .. } => {
 				Ok(Pattern::var(*index))
@@ -750,18 +758,26 @@ impl smt2::Server for Environment {
 	/// Check satifiability.
 	fn check_sat(&mut self) -> Result<smt2::response::CheckSat> {
 		use engine::Result::*;
-		loop {
+		let result = loop {
 			match self.engine.check()? {
-				None => return Ok(smt2::response::CheckSat::Unsat),
-				Some(Sat) => return Ok(smt2::response::CheckSat::Sat),
-				Some(Unknown) => return Ok(smt2::response::CheckSat::Unknown),
+				None => break smt2::response::CheckSat::Unsat,
+				Some(Sat) => break smt2::response::CheckSat::Sat,
+				Some(Unknown) => break smt2::response::CheckSat::Unknown,
 				Some(Unsat(new_constraint)) => {
 					for c in new_constraint {
 						self.engine.add(c)?
 					}
 				}
 			}
+		};
+
+		if self.print_benchmark {
+			let lt = self.engine.learning_duration().as_secs_f64();
+			let tt = self.engine.teaching_duration().as_secs_f64();
+			println!("; time: {}s ({}s learning, {}s teaching)", lt + tt, lt, tt)
 		}
+
+		Ok(result)
 	}
 
 	/// Declare a new constant.

@@ -44,6 +44,10 @@ fn main() {
 	let engine = rchc::Engine::new(learner, teacher);
 	let mut env = rchc::Environment::new(engine);
 
+	if matches.is_present("benchmark") {
+		env.enable_benchmark()
+	}
+
 	load_asset(&mut env, "builtin", include_bytes!("builtin.smt2"));
 
 	// Choose the input.

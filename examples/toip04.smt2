@@ -36,4 +36,3 @@
 )
 
 (check-sat)
-(get-model)

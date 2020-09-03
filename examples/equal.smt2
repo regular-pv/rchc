@@ -19,4 +19,3 @@
 )
 
 (check-sat)
-(get-model)
