@@ -20,7 +20,7 @@
 
 ; actual property
 (assert
-	(forall ((l (List AB))) (append l nil l))
+	(forall ((k (List AB)) (l (List AB))) (=> (append k nil l) (= k l)))
 )
 
 (check-sat)
